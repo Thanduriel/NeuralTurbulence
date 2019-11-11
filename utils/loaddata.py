@@ -19,6 +19,6 @@ def loadData(path):
 		w  = header['dimY']
 		bytes = header['bytesPerElement']
 		arr = content[:, ::-1, :, :] # reverse order of Y axis
-		arr = np.reshape(arr, [w, h, bytes // 4]) # discard Z
+		arr = np.reshape(arr, [w, h, bytes // 4])
 		data.append( arr )
 	return data

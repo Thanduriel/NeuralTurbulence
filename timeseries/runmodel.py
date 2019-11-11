@@ -17,33 +17,40 @@ args = parser.parse_args()
 print("Loading data.")
 densities = loadData(args.input + "density_*.uni")
 velocities = loadData(args.input + "vel_*.uni")
+numSteps = len(densities)
+simRes = densities[0].shape[0]
 
-densities = np.reshape( densities, (len(densities), 64,64,1) )
-velocities = np.reshape( velocities, (len(velocities), 64,64,3))
+
+densities = np.reshape( densities, (len(densities),) + densities[0].shape )
+velocities = np.reshape( velocities, (len(velocities),) + velocities[0].shape)
+
+# load model now to read the size config
+print("Loading model.")
+model = tf.keras.models.load_model(args.model)
+timeFrame = model.input_shape[1]
+
+
+# prepare data
 inputFrames = []
 outputFrames = []
 data = np.concatenate((densities,velocities), axis=3)
-for i in range(0, 248):
+for i in range(0, numSteps - timeFrame):
 	input = []
-	for j in range(0, 8):
+	for j in range(0, timeFrame):
 		input.append(data[i+j].flatten())
 	inputFrames.append(input)
-	outputFrames.append(data[i+8])
+	outputFrames.append(data[i+timeFrame])
+flatSize = simRes * simRes * 4
+inputFrames = np.reshape(inputFrames, (len(inputFrames),timeFrame,flatSize))
+outputFrames = np.reshape(outputFrames, (len(outputFrames),flatSize))
 
-inputFrames = np.reshape(inputFrames, (len(inputFrames),8,16384))#64,64,4
-outputFrames = np.reshape(outputFrames, (len(outputFrames),16384))
 
-# create validation pictures
-print("Loading model.")
-model = tf.keras.models.load_model(args.model)
-#initialState = validationIn[0];
-#for i in range(0, seriesPerSim):
 print("Applying model.")
 out = model.predict(inputFrames)
-out = np.reshape(out, (len(out), 64,64,4))
+out = np.reshape(out, (len(out), simRes,simRes,4))
 out = out[:,:,:,1]
 
-outputFrames = np.reshape(outputFrames, (len(outputFrames), 64,64,4));
+outputFrames = np.reshape(outputFrames, (len(outputFrames), simRes,simRes,4));
 outputFrames = outputFrames[:,:,:,1]
 print("Creating images.")
 for i in range(len(out)):
