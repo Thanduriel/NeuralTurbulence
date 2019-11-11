@@ -17,24 +17,28 @@ sys.path.append("../tools")
 # ----------------------------------------------------------------------#
 parser = argparse.ArgumentParser(description="Generate flow data.")
 parser.add_argument('--runs', type=int, default=1)
-parser.add_argument('--basePath', default='data/')
+parser.add_argument('--outputPath', default='data/')
+parser.add_argument('--steps', type=int, default=256)
 parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--savedata', type=bool, default=True)
+parser.add_argument('--resolution', type=int, default=64)
 
 args = parser.parse_args()
 
-steps = 256
-savedata = True
+steps = args.steps
+savedata = args.savedata
 saveppm = False
 simNo = 1000  # start ID
 showGui = False
-basePath = args.basePath
+basePath = args.outputPath
 npSeed = args.seed
 numRuns = args.runs
+resolution = args.resolution
 
 # enable for debugging
 #steps = 30 # shorter test
 #savedata = False # debug , dont write...
-showGui = True  # show UI
+#showGui = True
 
 # Scene settings
 # ---------------------------------------------------------------------#
@@ -43,7 +47,7 @@ setDebugLevel(1)
 for curNum in range(0, numRuns):
 	# Solver params
 	# ----------------------------------------------------------------------#
-	res = 64
+	res = resolution
 	dim = 2 
 	offset = 20
 	interval = 1

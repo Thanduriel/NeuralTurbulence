@@ -13,7 +13,7 @@ from tensorflow.keras import layers
 sys.path.append("../../tools")
 sys.path.append("../utils")
 import tilecreator
-from loaddata import loadData
+import ioext
 
 np.random.seed(13)
 tf.random.set_seed(13)
@@ -24,10 +24,8 @@ basePath = '../data/'
 
 trainingEpochs = 2500
 batchSize      = 10
-inSize         = 64 * 64 * 4 # warning - hard coded to scalar values 64^2
-inStepsPerSim  = 256
 timeFrame      = 8
-seriesPerSim   = inStepsPerSim - timeFrame
+savedModelName = "model02.h5"
 
 # load data
 inputFrames = []
@@ -39,19 +37,14 @@ for sim in range(1000,2000):
 	if not os.path.exists( dir ):
 		break
 
-	densities = loadData(dir + "density_*.uni")
-	velocities = loadData(dir + "vel_*.uni")
+	inFrames, outFrames, stepsPerSim, simRes = ioext.loadTimeseries(dir + "density_*.uni", dir + "vel_*.uni", timeFrame)
+	inputFrames.extend(inFrames)
+	outputFrames.extend(outFrames)
 
-	# create time series only from the same simulation
-	densities = np.reshape( densities, (len(densities), 64,64,1) )
-	velocities = np.reshape( velocities, (len(velocities), 64,64,3))
-	data = np.concatenate((densities,velocities), axis=3)
-	for i in range(0, seriesPerSim):
-		input = []
-		for j in range(0, timeFrame):
-			input.append(data[i+j].flatten())
-		inputFrames.append(input)
-		outputFrames.append(data[i+timeFrame])
+inSize         = simRes[0] * simRes[1] * simRes[2] # warning - hard coded to scalar values 64^2
+seriesPerSim = stepsPerSim - timeFrame
+
+
 
 validationIn = inputFrames[-seriesPerSim:];
 validationOut = outputFrames[-seriesPerSim:];
@@ -67,7 +60,7 @@ BATCH_SIZE = 16
 BUFFER_SIZE = 1000
 
 trainData = tf.data.Dataset.from_tensor_slices((inputFrames, outputFrames))
-trainData = trainData.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
+trainData = trainData.shuffle(BUFFER_SIZE).batch(BATCH_SIZE).repeat()
 
 validData = tf.data.Dataset.from_tensor_slices((validationIn, validationOut))
 validData = validData.batch(BATCH_SIZE)
@@ -75,19 +68,21 @@ validData = validData.batch(BATCH_SIZE)
 
 # set up the network
 model = keras.models.Sequential([
-	layers.LSTM(64, input_shape=inputFrames.shape[-2:]),
+	layers.LSTM(64, input_shape=inputFrames.shape[-2:], activation='sigmoid'), # default tanh throws error "Skipping optimization due to error while loading"
 	layers.Dense(inSize)
 #	layers.Reshape((64,64,4))
 ])
 
 model.compile(loss=keras.losses.MeanSquaredError(),
-              optimizer=keras.optimizers.Adam())
+              optimizer=keras.optimizers.RMSprop())
 
 # now we can start training...
 print("Starting training...")
 history = model.fit(trainData,
-                    epochs=10,
-                    validation_data=validData)
+                    epochs=3,
+                    validation_data=validData,
+					steps_per_epoch=inputFrames.shape[0])
 
-model.save("mymodel.h5")
+model.save("savedModelName.h5")
+print("Saved model.")
 
