@@ -27,6 +27,8 @@ def loadData(path):
 def loadTimeseries(densityPath, velocityPath, timeFrame):
 	densities = loadData(densityPath)
 	velocities = loadData(velocityPath)
+	assert(len(densities))
+	assert(len(densities) == len(velocities))
 
 	stepsPerSim = len(densities)
 	seriesPerSim   = stepsPerSim - timeFrame

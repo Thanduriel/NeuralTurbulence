@@ -20,7 +20,8 @@ tf.random.set_seed(13)
 
 
 # path to sim data, trained models and output are also saved here
-basePath = '../data/'
+basePath = 'data/'
+simName = "simSmall"
 
 trainingEpochs = 2500
 batchSize      = 10
@@ -33,7 +34,7 @@ outputFrames = []
 
 # start reading simSimple 1000 ff.
 for sim in range(1000,2000): 
-	dir = "{}/simSimple_{:04d}/".format(basePath,sim)
+	dir = "{}{}{:04d}/".format(basePath,simName,sim)
 	if not os.path.exists( dir ):
 		break
 
@@ -48,7 +49,7 @@ seriesPerSim = stepsPerSim - timeFrame
 
 validationIn = inputFrames[-seriesPerSim:];
 validationOut = outputFrames[-seriesPerSim:];
-validationIn = np.reshape(validationIn, (len(validationIn),timeFrame,inSize))#64,64,4
+validationIn = np.reshape(validationIn, (len(validationIn),timeFrame,inSize))
 validationOut = np.reshape(validationOut, (len(validationOut),inSize))
 
 inputFrames = inputFrames[:-seriesPerSim];
@@ -68,7 +69,7 @@ validData = validData.batch(BATCH_SIZE)
 
 # set up the network
 model = keras.models.Sequential([
-	layers.LSTM(64, input_shape=inputFrames.shape[-2:], activation='sigmoid'), # default tanh throws error "Skipping optimization due to error while loading"
+	layers.LSTM(256, input_shape=inputFrames.shape[-2:], activation='sigmoid'), # default tanh throws error "Skipping optimization due to error while loading"
 	layers.Dense(inSize)
 #	layers.Reshape((64,64,4))
 ])
@@ -79,10 +80,15 @@ model.compile(loss=keras.losses.MeanSquaredError(),
 # now we can start training...
 print("Starting training...")
 history = model.fit(trainData,
-                    epochs=3,
+                    epochs=10,
                     validation_data=validData,
-					steps_per_epoch=inputFrames.shape[0])
+					steps_per_epoch=256)
 
-model.save("savedModelName.h5")
-print("Saved model.")
+fileName = "model.h5"
+i = 0
+while os.path.isfile(fileName):
+	fileName = "model{}.h5".format(i)
+	i += 1
+model.save(fileName)
+print("Saved model as {}.".format(fileName))
 
