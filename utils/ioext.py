@@ -26,9 +26,9 @@ def loadData(path):
 
 def loadTimeseries(densityPath, velocityPath, timeFrame):
 	densities = loadData(densityPath)
-	velocities = loadData(velocityPath)
+	#velocities = loadData(velocityPath)
 	assert(len(densities))
-	assert(len(densities) == len(velocities))
+	#assert(len(densities) == len(velocities))
 
 	stepsPerSim = len(densities)
 	seriesPerSim   = stepsPerSim - timeFrame
@@ -37,8 +37,9 @@ def loadTimeseries(densityPath, velocityPath, timeFrame):
 	inputFrames = []
 	outputFrames = []
 	densities = np.reshape( densities, (len(densities), ) + densities[0].shape )
-	velocities = np.reshape( velocities, (len(velocities), ) + velocities[0].shape)
-	data = np.concatenate((densities,velocities), axis=3)
+#	velocities = np.reshape( velocities, (len(velocities), ) + velocities[0].shape)
+#	data = np.concatenate((densities,velocities), axis=3)
+	data = densities
 	for i in range(0, seriesPerSim):
 		input = []
 		for j in range(0, timeFrame):
@@ -47,8 +48,10 @@ def loadTimeseries(densityPath, velocityPath, timeFrame):
 		outputFrames.append(data[i+timeFrame])
 
 	simRes = data[0].shape
-	flatSize = simRes[0] * simRes[1] * simRes[2]
-	inputFrames = np.reshape(inputFrames, (len(inputFrames),timeFrame,flatSize))
-	outputFrames = np.reshape(outputFrames, (len(outputFrames),flatSize))
+	inputFrames = np.reshape(inputFrames, (len(inputFrames),timeFrame)+simRes)
+	outputFrames = np.reshape(outputFrames, (len(outputFrames),)+simRes)
+#	flatSize = simRes[0] * simRes[1] * simRes[2]
+#	inputFrames = np.reshape(inputFrames, (len(inputFrames),timeFrame,flatSize))
+#	outputFrames = np.reshape(outputFrames, (len(outputFrames),flatSize))
 
 	return inputFrames, outputFrames, stepsPerSim, simRes

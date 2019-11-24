@@ -62,7 +62,6 @@ scaleFactor = 4
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
-# wlt Turbulence input fluid
 sm = Solver(name='smaller', gridSize = gs, dim=dim)
 sm.timestep = 0.5
 
@@ -75,12 +74,15 @@ vel = sm.create(MACGrid)
 density = sm.create(RealGrid)
 pressure = sm.create(RealGrid)
 
+
 # open boundaries
 bWidth = 1
 flags.initDomain(boundaryWidth=bWidth)
+obstacle = sm.create(Sphere, center=gs*vec3(0.5,0.4,0.5), radius=res*0.10)
+phiObs = obstacle.computeLevelset()
+setObstacleFlags(flags=flags, phiObs=phiObs)
 flags.fillGrid()
-
-#setOpenBound(flags,	bWidth,'Y',FlagOutflow | FlagEmpty) 
+setOpenBound(flags,	bWidth,'yY',FlagOutflow | FlagEmpty) 
 
 # inflow sources
 # ----------------------------------------------------------------------#
@@ -91,16 +93,15 @@ velInflow = vec3(np.random.uniform(-0.02,0.02), 0, 0)
 
 # inflow noise field
 noise = NoiseField( parent=sm, fixedSeed = np.random.randint(2**30), loadFromFile=True)
-noise.posScale = vec3(20)
+noise.posScale = vec3(45)
 noise.clamp = True
 noise.clampNeg = 0
-noise.clampPos = 2
-noise.valScale = 1
-noise.valOffset = 0.075
-noise.timeAnim = 0.3
+noise.clampPos = 1
+noise.valOffset = 0.75
+noise.timeAnim = 0.2
 
-source    = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.081, z=gs*vec3(np.random.uniform(-0.2,0.2), 0.1, 0))
-sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
+source    = Cylinder( parent=sm, center=gs*vec3(0.5,0.0,0.5), radius=res*0.081, z=gs*vec3(0, 0.1, 0))
+#sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
 
 # Setup UI
 # ---------------------------------------------------------------------#
@@ -111,7 +112,7 @@ if (showGui and GUI):
 
 t = 0
 resetN = 20
-offset = 8
+offset = 0
 
 if savedata:
 	folderNo = simNo
@@ -135,17 +136,17 @@ while t < steps + offset:
 	advectSemiLagrange(flags=flags, vel=vel, grid=density, order=2, openBounds=True, boundaryWidth=bWidth)
 	advectSemiLagrange(flags=flags, vel=vel, grid=vel,	 order=2, openBounds=True, boundaryWidth=bWidth)
 
-	if (sm.timeTotal>=0 and sm.timeTotal<offset):
-		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=10, sigma=0.5 )
-		vorticityConfinement(vel=vel, flags=flags, strength=0.05)
+	if (sm.timeTotal>=0): #and sm.timeTotal<offset):
+		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 	#	sourceVel.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
+	resetOutflow( flags=flags, real=density )
+	vorticityConfinement(vel=vel, flags=flags, strength=0.05)
 	setWallBcs(flags=flags, vel=vel)
 	addBuoyancy(density=density, vel=vel, gravity=buoy , flags=flags)
 #		if (t < offset): 
 #			vorticityConfinement(vel=vel, flags=flags, strength=0.05)
 	solvePressure(flags=flags, vel=vel, pressure=pressure ,  cgMaxIterFac=10.0, cgAccuracy=0.0001)
-	setWallBcs(flags=flags, vel=vel)
 
 
 	# save data

@@ -1,0 +1,10 @@
+data/
+*.bin
+*.exe
+*.pdf
+*.mp4
+*.png
+
+*.sqlite
+*.json
+*.suo
