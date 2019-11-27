@@ -23,11 +23,11 @@ tf.random.set_seed(13)
 basePath = 'data/'
 simName = "simSimple_"
 
-trainingEpochs = 128
+trainingEpochs = 10
 batchSize      = 10
 timeFrame      = 4
 convStride     = 2
-lstmSize       = 512
+lstmSize       = 4096
 savedModelName = "model"
 
 # load data
@@ -74,20 +74,20 @@ validData = tf.data.Dataset.from_tensor_slices((validationIn, validationOut))
 validData = validData.batch(BATCH_SIZE)
 
 # set up the network
-numFilters = 3#simRes[2]
-lstmInSize = simRes[0]*simRes[1]*numFilters // convStride**2
+numFilters = 1#simRes[2]
+lstmInSize = simRes[0]*simRes[1]*numFilters# // convStride**2
 totalConv = convStride
 
 model = keras.models.Sequential([
-	layers.TimeDistributed(layers.Conv2D(numFilters, 2, strides=convStride, padding='same'), input_shape=(timeFrame,)+simRes),
+#	layers.TimeDistributed(layers.Conv2D(numFilters, 2, strides=convStride, padding='same'), input_shape=(timeFrame,)+simRes),
 #	layers.TimeDistributed(layers.Conv2D(4, 2, strides=convStride, padding='same')),
 	layers.Reshape((timeFrame,lstmInSize)),
 	layers.LSTM(lstmSize, activation='sigmoid', stateful=False), # default tanh throws error "Skipping optimization due to error while loading"
-	layers.Dense(lstmInSize // 3),
-	layers.Reshape((simRes[0] // totalConv, simRes[1] // totalConv,1)),
-	layers.Conv2DTranspose(1,2,strides=convStride),
-	layers.Flatten(),
-	layers.Dense(simRes[0]*simRes[1]*simRes[2]),
+#	layers.Dense(lstmInSize // 3),
+#	layers.Reshape((simRes[0] // totalConv, simRes[1] // totalConv,1)),
+#	layers.Conv2DTranspose(1,2,strides=convStride),
+#	layers.Flatten(),
+#	layers.Dense(simRes[0]*simRes[1]*simRes[2]),
 #	layers.Conv2DTranspose(4,3,strides=1)
 	layers.Reshape(simRes)
 ])

@@ -136,7 +136,7 @@ while t < steps + offset:
 	advectSemiLagrange(flags=flags, vel=vel, grid=density, order=2, openBounds=True, boundaryWidth=bWidth)
 	advectSemiLagrange(flags=flags, vel=vel, grid=vel,	 order=2, openBounds=True, boundaryWidth=bWidth)
 
-	if (sm.timeTotal>=0): #and sm.timeTotal<offset):
+	if (sm.timeTotal>=0 and t % 512 < 256): #and sm.timeTotal<offset):
 		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 	#	sourceVel.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
