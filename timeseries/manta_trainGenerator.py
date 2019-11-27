@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description="Train and generate data simultaneo
 parser.add_argument('--steps', type=int, default=128)
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--resolution', type=int, default=32)
-parser.add_argument('--modelName', default="modelGen.h5")
+parser.add_argument('--modelName', default="fastForward.h5")
 parser.add_argument('--gui', dest='showGui', action='store_true')
 parser.set_defaults(showGui=False)
 
@@ -120,7 +120,7 @@ def generateData(offset, batchSize):
 		advectSemiLagrange(flags=flags, vel=vel, grid=density, order=2, openBounds=True, boundaryWidth=bWidth)
 		advectSemiLagrange(flags=flags, vel=vel, grid=vel,	 order=2, openBounds=True, boundaryWidth=bWidth)
 
-		if (sm.timeTotal>=0 and t % 512 < 256): #and sm.timeTotal<offset):
+		if (sm.timeTotal>=0): #and sm.timeTotal<offset):
 			densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 		#	sourceVel.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
@@ -134,12 +134,12 @@ def generateData(offset, batchSize):
 
 		currentVal = gridext.toNumpyArray(density,simRes)
 		currentVal = currentVal[::-1,:,:];
-		if t > offset and t % 512 >= 256 + windowSize:
-			currentInputBatch.append(np.copy(slidingWindow));
+		if t > offset:
+			currentInputBatch.append(currentVal)#np.copy(slidingWindow));
 			currentOutputBatch.append(currentVal)
 
 			if(len(currentInputBatch) == batchSize):
-				input = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
+				input = np.reshape(currentInputBatch, (batchSize,)+currentVal.shape)
 				output = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
 				yield (input, output)
 				currentInputBatch = []
@@ -156,17 +156,19 @@ def generateData(offset, batchSize):
 # ----------------------------------------------------------------------#
 lstmInSize = simRes[0]*simRes[1]*simRes[2]
 model = keras.models.Sequential([
-	layers.Reshape((windowSize,lstmInSize), input_shape=(windowSize,)+simRes),
-	layers.LSTM(lstmSize, activation='sigmoid', stateful=False), # default tanh throws error "Skipping optimization due to error while loading"
+	layers.Flatten(input_shape=simRes),
+	layers.Dense(lstmInSize),
+#	layers.Reshape((windowSize,lstmInSize), input_shape=(windowSize,)+simRes),
+#	layers.LSTM(lstmSize, activation='relu', stateful=False), # default tanh throws error "Skipping optimization due to error while loading"
 	layers.Reshape(simRes)
 ])
 
 model.compile(loss=keras.losses.MeanSquaredError(),
               optimizer=keras.optimizers.RMSprop())
 
-model.load_weights("models/cp.ckpt")
-model.save("model32Bursts.h5")
-exit()
+#model.load_weights("models/cp.ckpt")
+#model.save("model32FastForward.h5")
+#exit()
 
 # model training
 # ----------------------------------------------------------------------#
@@ -174,9 +176,9 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="models/cp.ckpt",
                                                  save_weights_only=True,
                                                  verbose=1)
 
-history = model.fit_generator(generateData(512, batchSize),
+history = model.fit_generator(generateData(512, 1),
 							  steps_per_epoch=512, 
-							  epochs=256,
+							  epochs=8,
 							  callbacks=[cp_callback])
 
 model.save(args.modelName)

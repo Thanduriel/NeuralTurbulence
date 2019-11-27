@@ -33,7 +33,7 @@ timeFrame = 4#model.input_shape[1]
 print("Loading data.")
 
 inputFrames, outputFrames, stepsPerSim, simRes = ioext.loadTimeseries(args.input + "density_*.uni", args.input + "vel_*.uni", timeFrame)
-inputFrames = inputFrames[args.begin:]
+inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
 outputFrames = outputFrames[args.begin:]
 print("Found {} time frames.".format(len(inputFrames)))
 
@@ -78,7 +78,7 @@ def error(array1, array2):
 if args.computeError:
 	total = 0
 	for i in range(len(out)):
-		print(error(out[i], outputFrames[i]))
+	#	print(error(out[i], outputFrames[i]))
 		total += error(out[i], outputFrames[i])
 	print("Total loss: {}.".format(total))
 
