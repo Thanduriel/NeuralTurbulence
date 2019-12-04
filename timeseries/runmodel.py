@@ -28,7 +28,7 @@ postfix = "Full" if args.fullpredict else ""
 # load model now to read the size config
 print("Loading model.")
 model = tf.keras.models.load_model(args.model)
-timeFrame = 4#model.input_shape[1]
+timeFrame = model.input_shape[1]
 
 print("Loading data.")
 

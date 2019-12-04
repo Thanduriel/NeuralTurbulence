@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description="Train and generate data simultaneo
 parser.add_argument('--steps', type=int, default=128)
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--resolution', type=int, default=32)
-parser.add_argument('--modelName', default="fastForward.h5")
+parser.add_argument('--modelName', default="test.h5")
 parser.add_argument('--gui', dest='showGui', action='store_true')
 parser.set_defaults(showGui=False)
 
@@ -34,19 +34,14 @@ simName = "trololo"
 npSeed = args.seed
 resolution = args.resolution
 
-# enable for debugging
-#steps = 30 # shorter test
-#savedata = False # debug , dont write...
-#showGui = True
-
 # Scene settings
 # ---------------------------------------------------------------------#
-setDebugLevel(0)
+setDebugLevel(1)
 
 # NN params
 # ----------------------------------------------------------------------#
 windowSize = 4
-batchSize = 8
+batchSize = 1
 lstmSize = resolution * resolution
 
 # Solver params
@@ -56,7 +51,6 @@ dim = 2
 offset = 20
 interval = 1
 
-scaleFactor = 4
 
 simRes = (res,res,1)
 gs = vec3(res,res, 1 if dim == 2 else res)
@@ -73,6 +67,9 @@ flags = sm.create(FlagGrid)
 vel = sm.create(MACGrid)
 density = sm.create(RealGrid)
 pressure = sm.create(RealGrid)
+vorticity = sm.create(RealGrid)
+divergence = sm.create(RealGrid)
+velReconstructed = sm.create(MACGrid)
 
 # open boundaries
 bWidth = 1
@@ -102,7 +99,7 @@ noise.timeAnim = 0.2
 source    = Cylinder( parent=sm, center=gs*vec3(0.5,0.0,0.5), radius=res*0.081, z=gs*vec3(0, 0.1, 0))
 #sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
 
-if args.showGui:
+if args.showGui or True:
 	gui = Gui()
 	gui.show()
 
@@ -120,26 +117,40 @@ def generateData(offset, batchSize):
 		advectSemiLagrange(flags=flags, vel=vel, grid=density, order=2, openBounds=True, boundaryWidth=bWidth)
 		advectSemiLagrange(flags=flags, vel=vel, grid=vel,	 order=2, openBounds=True, boundaryWidth=bWidth)
 
-		if (sm.timeTotal>=0): #and sm.timeTotal<offset):
+		if (sm.timeTotal>=0 and sm.timeTotal<offset):
 			densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 		#	sourceVel.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
-		resetOutflow( flags=flags, real=density )
-		vorticityConfinement(vel=vel, flags=flags, strength=0.05)
+	#	resetOutflow( flags=flags, real=density )
+	#	vorticityConfinement(vel=vel, flags=flags, strength=0.05)
 		setWallBcs(flags=flags, vel=vel)
 		addBuoyancy(density=density, vel=vel, gravity=buoy , flags=flags)
-	#		if (t < offset): 
-	#			vorticityConfinement(vel=vel, flags=flags, strength=0.05)
+	#	if (t < offset): 
+	#		vorticityConfinement(vel=vel, flags=flags, strength=0.05)
 		solvePressure(flags=flags, vel=vel, pressure=pressure ,  cgMaxIterFac=10.0, cgAccuracy=0.0001)
+
+		getCurl(vel=vel, vort=vorticity , comp=2)
+		getCodifferential(vel=velReconstructed, vort=vorticity)
+
+		getDivergence(div=divergence, vel=velReconstructed)
+		print("div reconstructed: {}".format(divergence.getL2()))
+		getDivergence(div=divergence, vel=vel)
+		print("div original:      {}".format(divergence.getL2()))
+		divergence.setConst(0)
+
+		velReconstructed.sub(vel)
+		print("dif vectorfields:  {}".format(velReconstructed.getL2()))
+		velReconstructed.setConst(vec3(0,0,0))
+#		vorticity.printGrid()
 
 		currentVal = gridext.toNumpyArray(density,simRes)
 		currentVal = currentVal[::-1,:,:];
 		if t > offset:
-			currentInputBatch.append(currentVal)#np.copy(slidingWindow));
+			currentInputBatch.append(np.copy(slidingWindow));
 			currentOutputBatch.append(currentVal)
 
 			if(len(currentInputBatch) == batchSize):
-				input = np.reshape(currentInputBatch, (batchSize,)+currentVal.shape)
+				input = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
 				output = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
 				yield (input, output)
 				currentInputBatch = []
@@ -152,14 +163,15 @@ def generateData(offset, batchSize):
 		sm.step()
 		t = t + 1
 
+gen = generateData(512, batchSize)
+while True:
+	next(gen)
 # model setup
 # ----------------------------------------------------------------------#
 lstmInSize = simRes[0]*simRes[1]*simRes[2]
 model = keras.models.Sequential([
-	layers.Flatten(input_shape=simRes),
-	layers.Dense(lstmInSize),
-#	layers.Reshape((windowSize,lstmInSize), input_shape=(windowSize,)+simRes),
-#	layers.LSTM(lstmSize, activation='relu', stateful=False), # default tanh throws error "Skipping optimization due to error while loading"
+	layers.Reshape((windowSize,lstmInSize), batch_input_shape=(batchSize,windowSize)+simRes),
+	layers.LSTM(lstmSize, activation='relu', stateful=True), # default tanh throws error "Skipping optimization due to error while loading"
 	layers.Reshape(simRes)
 ])
 
@@ -176,9 +188,10 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="models/cp.ckpt",
                                                  save_weights_only=True,
                                                  verbose=1)
 
-history = model.fit_generator(generateData(512, 1),
+history = model.fit_generator(generateData(512, batchSize),
 							  steps_per_epoch=512, 
-							  epochs=8,
-							  callbacks=[cp_callback])
+							  epochs=1,
+							  callbacks=[cp_callback],
+							  use_multiprocessing=False)
 
 model.save(args.modelName)
