@@ -3,17 +3,16 @@ import numpy as np
 import argparse
 import sys
 import subprocess
-import matplotlib.pyplot as plt
+import frequency
 sys.path.append("../utils")
 import ioext
 from saveimg import arrayToImgFile
 
 parser = argparse.ArgumentParser(description="Runs a saved model and creates a video from its output.")
-parser.add_argument('--input', default='data/validation32New/')
+parser.add_argument('--input', default='data/vorticityValidation/')
 parser.add_argument('--output', default='predicted.mp4')
 parser.add_argument('model', default='model3.h5')
 parser.add_argument('--begin', type=int, default=0)
-parser.add_argument('--fullpredict', dest='fullpredict', action='store_true')
 parser.add_argument('--reference', dest='showReference', action='store_true')
 parser.add_argument('--no-predict', dest='predict', action='store_false')
 parser.add_argument('--compute-error', dest='computeError', action='store_true')
@@ -23,8 +22,7 @@ parser.set_defaults(predict=True)
 parser.set_defaults(computeError=False)
 
 args = parser.parse_args()
-predict = args.predict or args.fullpredict
-postfix = "Full" if args.fullpredict else ""
+predict = args.predict
 
 # load model now to read the size config
 print("Loading model.")
@@ -33,46 +31,38 @@ timeFrame = model.input_shape[1]
 
 print("Loading data.")
 
-inputFrames, outputFrames, stepsPerSim, simRes = ioext.loadTimeseries(args.input + "density_*.uni", args.input + "vel_*.uni", timeFrame)
+inputs = ioext.loadNPData(args.input + "lowres_*.npy")
+inputFrames, lowRes = ioext.createTimeSeries(inputs, timeFrame)
 inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
-outputFrames = outputFrames[args.begin:]
+outputs = ioext.loadNPData(args.input + "fullres_*.npy")
+simRes = outputs[0].shape
+outputs = outputs[args.begin:]
+
 print("Found {} time frames.".format(len(inputFrames)))
 
 print("Applying model.")
-if(args.fullpredict):
-	out = []
-	inputFrame = inputFrames[0:1]
-	for i in range(len(inputFrames)):
-		output = model.predict(inputFrame)
-		inputFrame[:,0:timeFrame-1] = inputFrame[:,1:]
-		inputFrame[:,timeFrame-1] = np.reshape(output, simRes)
-		out.append(output)
-elif (args.predict or args.computeError):
-	out = model.predict(inputFrames)
+out = model.predict(inputFrames)
 
-if predict or args.computeError:
-	out = np.reshape(out, (len(out),) + simRes)
-	out = out[:,:,:,0]
+out = np.reshape(out, (len(out),) + simRes)
 
-outputFrames = np.reshape(outputFrames, (len(outputFrames), ) + simRes);
-outputFrames = outputFrames[:,:,:,0]
+outputFrames = np.reshape(outputs, (len(outputs), ) + simRes);
 print("Creating images.")
 
 if predict:
 	for i in range(len(out)):
-		plt.imshow(out[i])
-		plt.savefig("temp/predicted_{0}.png".format(i))
+		vorticity = frequency.invTransform(frequency.flattenComplex(out[i]))
+		arrayToImgFile(vorticity.real, "temp/predicted_{0}.png".format(i))
 
 if args.showReference: 
 	for i in range(len(outputFrames)):
-		plt.imshow(outputFrames[i], 
-		plt.savefig("temp/original_{0}.png".format(i))
+		vorticity = frequency.invTransform(frequency.flattenComplex(outputFrames[i]))
+		arrayToImgFile(vorticity.real, "temp/original_{0}.png".format(i))
 
 print("Creating video.")
 if args.showReference:
 	subprocess.run("ffmpeg -framerate 24 -i temp/original_%0d.png -vf scale=64:64 original{}.mp4".format(args.model))
 if predict:
-	subprocess.run("ffmpeg -framerate 24 -i temp/predicted_%0d.png -vf scale=64:64 predicted{}{}.mp4".format(args.model,postfix))
+	subprocess.run("ffmpeg -framerate 24 -i temp/predicted_%0d.png -vf scale=64:64 predicted{}.mp4".format(args.model))
 
 def error(array1, array2):
 	dif = np.subtract(array1, array2)

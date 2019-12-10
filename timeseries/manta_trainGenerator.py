@@ -14,6 +14,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import frequency
 sys.path.append("../utils")
 import gridext
 
@@ -23,7 +24,7 @@ parser = argparse.ArgumentParser(description="Train and generate data simultaneo
 parser.add_argument('--steps', type=int, default=128)
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--resolution', type=int, default=32)
-parser.add_argument('--modelName', default="test.h5")
+parser.add_argument('--modelName', default="vorticity3.h5")
 parser.add_argument('--gui', dest='showGui', action='store_true')
 parser.set_defaults(showGui=False)
 
@@ -36,12 +37,12 @@ resolution = args.resolution
 
 # Scene settings
 # ---------------------------------------------------------------------#
-setDebugLevel(1)
+setDebugLevel(0)
 
 # NN params
 # ----------------------------------------------------------------------#
 windowSize = 4
-batchSize = 1
+batchSize = 8
 lstmSize = resolution * resolution
 
 # Solver params
@@ -51,8 +52,10 @@ dim = 2
 offset = 20
 interval = 1
 
-
+simResRed = (res,res)
 simRes = (res,res,1)
+outputRes = (res,res,2)
+lowFreqRes = (res//2,res//2,2) # real, imag part
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
@@ -65,9 +68,9 @@ timings = Timings()
 # -------------------------------------------------------------------#
 flags = sm.create(FlagGrid)
 vel = sm.create(MACGrid)
+vorticity = sm.create(RealGrid)
 density = sm.create(RealGrid)
 pressure = sm.create(RealGrid)
-vorticity = sm.create(RealGrid)
 divergence = sm.create(RealGrid)
 velReconstructed = sm.create(MACGrid)
 
@@ -99,12 +102,12 @@ noise.timeAnim = 0.2
 source    = Cylinder( parent=sm, center=gs*vec3(0.5,0.0,0.5), radius=res*0.081, z=gs*vec3(0, 0.1, 0))
 #sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
 
-if args.showGui or True:
-	gui = Gui()
-	gui.show()
+#if args.showGui or True:
+#	gui = Gui()
+#	gui.show()
 
 def generateData(offset, batchSize):
-	slidingWindow = np.zeros((windowSize,)+simRes)
+	slidingWindow = np.zeros((windowSize,)+lowFreqRes)
 	t = 0
 	currentInputBatch = []
 	currentOutputBatch = []
@@ -117,8 +120,8 @@ def generateData(offset, batchSize):
 		advectSemiLagrange(flags=flags, vel=vel, grid=density, order=2, openBounds=True, boundaryWidth=bWidth)
 		advectSemiLagrange(flags=flags, vel=vel, grid=vel,	 order=2, openBounds=True, boundaryWidth=bWidth)
 
-		if (sm.timeTotal>=0 and sm.timeTotal<offset):
-			densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
+	#	if (sm.timeTotal>=0 and sm.timeTotal<offset):
+		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 		#	sourceVel.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
 	#	resetOutflow( flags=flags, real=density )
@@ -130,56 +133,73 @@ def generateData(offset, batchSize):
 		solvePressure(flags=flags, vel=vel, pressure=pressure ,  cgMaxIterFac=10.0, cgAccuracy=0.0001)
 
 		getCurl(vel=vel, vort=vorticity , comp=2)
-		getCodifferential(vel=velReconstructed, vort=vorticity)
+	#	getCodifferential(vel=velReconstructed, vort=vorticity)
 
-		getDivergence(div=divergence, vel=velReconstructed)
-		print("div reconstructed: {}".format(divergence.getL2()))
-		getDivergence(div=divergence, vel=vel)
-		print("div original:      {}".format(divergence.getL2()))
-		divergence.setConst(0)
+	#	getDivergence(div=divergence, vel=velReconstructed)
+	#	print("div reconstructed: {}".format(divergence.getL2()))
+	#	getDivergence(div=divergence, vel=vel)
+	#	print("div original:      {}".format(divergence.getL2()))
+	#	divergence.setConst(0)
 
-		velReconstructed.sub(vel)
-		print("dif vectorfields:  {}".format(velReconstructed.getL2()))
-		velReconstructed.setConst(vec3(0,0,0))
+	#	velReconstructed.sub(vel)
+	#	print("dif vectorfields:  {}".format(velReconstructed.getL2()))
+	#	velReconstructed.setConst(vec3(0,0,0))
 #		vorticity.printGrid()
 
-		currentVal = gridext.toNumpyArray(density,simRes)
-		currentVal = currentVal[::-1,:,:];
+		currentVal = gridext.toNumpyArray(vorticity,simResRed)
+		currentVal = currentVal[::-1,:]
+		freqs, lowFreqs = frequency.decompose(currentVal, np.array(lowFreqRes)[0:1])
+		input = lowFreqs
+	#	test = lowFreqs
+	#	test = frequency.flattenComplex(test)
+	#	test = frequency.invTransform(test)
+	#	print(np.linalg.norm(test-currentVal))
+		# transform complex array into extra dimensions
+		currentVal = freqs
 		if t > offset:
 			currentInputBatch.append(np.copy(slidingWindow));
 			currentOutputBatch.append(currentVal)
 
 			if(len(currentInputBatch) == batchSize):
-				input = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
-				output = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
-				yield (input, output)
+				inputs = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
+				outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
+				yield (inputs, outputs)
 				currentInputBatch = []
 				currentOutputBatch = []
+
+		#	np.save("data/vorticityValidation/lowres_{:04d}".format(t), input)
+		#	np.save("data/vorticityValidation/fullres_{:04d}".format(t), currentVal)
 		
 		# move window
 		slidingWindow[0:windowSize-1] = slidingWindow[1:]
-		slidingWindow[-1] = currentVal
+		slidingWindow[-1] = input
 
 		sm.step()
 		t = t + 1
 
-gen = generateData(512, batchSize)
-while True:
-	next(gen)
+#gen = generateData(512, batchSize)
+#for i in range(512):
+#	next(gen)
+
 # model setup
 # ----------------------------------------------------------------------#
-lstmInSize = simRes[0]*simRes[1]*simRes[2]
+lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
+inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
 model = keras.models.Sequential([
-	layers.Reshape((windowSize,lstmInSize), batch_input_shape=(batchSize,windowSize)+simRes),
-	layers.LSTM(lstmSize, activation='relu', stateful=True), # default tanh throws error "Skipping optimization due to error while loading"
-	layers.Reshape(simRes)
+	layers.Reshape((windowSize,inSize), input_shape=(windowSize,)+lowFreqRes),
+	layers.LSTM(inSize, activation='tanh', 
+			 stateful=True,
+			 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
+	layers.LSTM(inSize*2),
+	layers.Dense(lstmInSize),
+	layers.Reshape(outputRes)
 ])
 
 model.compile(loss=keras.losses.MeanSquaredError(),
               optimizer=keras.optimizers.RMSprop())
 
 #model.load_weights("models/cp.ckpt")
-#model.save("model32FastForward.h5")
+#model.save("modelVorticity.h5")
 #exit()
 
 # model training
@@ -190,7 +210,7 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="models/cp.ckpt",
 
 history = model.fit_generator(generateData(512, batchSize),
 							  steps_per_epoch=512, 
-							  epochs=1,
+							  epochs=128,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
