@@ -42,7 +42,7 @@ setDebugLevel(0)
 # NN params
 # ----------------------------------------------------------------------#
 windowSize = 4
-batchSize = 8
+batchSize = 1
 lstmSize = resolution * resolution
 
 # Solver params
@@ -186,11 +186,14 @@ def generateData(offset, batchSize):
 lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
 inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
 model = keras.models.Sequential([
-	layers.Reshape((windowSize,inSize), input_shape=(windowSize,)+lowFreqRes),
+	layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
 	layers.LSTM(inSize, activation='tanh', 
 			 stateful=True,
 			 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
-	layers.LSTM(inSize*2),
+	layers.LSTM(lstmInSize,
+			 stateful=True),
+#	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
+#	layers.Conv2DTranspose(3,2,strides = 1),
 	layers.Dense(lstmInSize),
 	layers.Reshape(outputRes)
 ])
@@ -198,13 +201,13 @@ model = keras.models.Sequential([
 model.compile(loss=keras.losses.MeanSquaredError(),
               optimizer=keras.optimizers.RMSprop())
 
-#model.load_weights("models/cp.ckpt")
-#model.save("modelVorticity.h5")
+#model.load_weights("currentmodel/cp.ckpt")
+#model.save("vorticityStateful2.h5")
 #exit()
 
 # model training
 # ----------------------------------------------------------------------#
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="models/cp.ckpt",
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt",
                                                  save_weights_only=True,
                                                  verbose=1)
 

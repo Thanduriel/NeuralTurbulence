@@ -3,7 +3,6 @@ import numpy as np
 import argparse
 import sys
 import subprocess
-import matplotlib.pyplot as plt
 sys.path.append("../utils")
 import ioext
 from saveimg import arrayToImgFile
@@ -60,13 +59,11 @@ print("Creating images.")
 
 if predict:
 	for i in range(len(out)):
-		plt.imshow(out[i])
-		plt.savefig("temp/predicted_{0}.png".format(i))
+		arrayToImgFile(out[i], "temp/predicted_{0}.png".format(i))
 
 if args.showReference: 
 	for i in range(len(outputFrames)):
-		plt.imshow(outputFrames[i], 
-		plt.savefig("temp/original_{0}.png".format(i))
+		arrayToImgFile(outputFrames[i], "temp/original_{0}.png".format(i))
 
 print("Creating video.")
 if args.showReference:

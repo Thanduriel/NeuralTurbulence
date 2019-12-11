@@ -24,8 +24,38 @@ def loadData(path):
 		data.append( arr )
 	return data
 
+# load all npy files matching the given mask
+def loadNPData(path):
+	files = []
+	for entry in glob.glob(path, recursive=True):
+		files.append(entry)
+	# order is arbitary
+	files.sort()
+
+	data = []
+	for f in files:
+		arr = np.load(f)
+		data.append( arr )
+	return data
+
+def createTimeSeries(data, windowSize):
+	steps = len(data)
+	numWindows   = steps - windowSize
+	inputFrames = []
+
+	for i in range(0, numWindows):
+		input = []
+		for j in range(0, windowSize):
+			input.append(data[i+j].flatten())
+		inputFrames.append(input)
+
+	simRes = data[0].shape
+	inputFrames = np.reshape(inputFrames, (len(inputFrames),windowSize)+simRes)
+
+	return inputFrames, simRes
+
 def loadTimeseries(densityPath, velocityPath, timeFrame):
-	densities = loadData(densityPath)
+	densities = loadNPData(densityPath)
 	#velocities = loadData(velocityPath)
 	assert(len(densities))
 	#assert(len(densities) == len(velocities))
