@@ -23,7 +23,7 @@ import gridext
 parser = argparse.ArgumentParser(description="Train and generate data simultaneously.")
 parser.add_argument('--steps', type=int, default=128)
 parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--resolution', type=int, default=32)
+parser.add_argument('--resolution', type=int, default=64)
 parser.add_argument('--modelName', default="vorticity3.h5")
 parser.add_argument('--gui', dest='showGui', action='store_true')
 parser.set_defaults(showGui=False)
@@ -52,14 +52,14 @@ dim = 2
 offset = 20
 interval = 1
 
-simResRed = (res,res)
-simRes = (res,res,1)
-outputRes = (res,res,2)
-lowFreqRes = (res//2,res//2,2) # real, imag part
+simResRed = (res,res*2)
+simRes = simResRed + (1,)
+outputRes = (res,res*2,2)
+lowFreqRes = (res//2,simRes[1]//2,2) # real, imag part
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
-sm = Solver(name='smaller', gridSize = gs, dim=dim)
+sm = Solver(name='smaller', gridSize = simRes, dim=dim)
 sm.timestep = 0.5
 
 timings = Timings()
@@ -102,9 +102,9 @@ noise.timeAnim = 0.2
 source    = Cylinder( parent=sm, center=gs*vec3(0.5,0.0,0.5), radius=res*0.081, z=gs*vec3(0, 0.1, 0))
 #sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
 
-#if args.showGui or True:
-#	gui = Gui()
-#	gui.show()
+if args.showGui:
+	gui = Gui()
+	gui.show()
 
 def generateData(offset, batchSize):
 	slidingWindow = np.zeros((windowSize,)+lowFreqRes)
@@ -147,8 +147,8 @@ def generateData(offset, batchSize):
 #		vorticity.printGrid()
 
 		currentVal = gridext.toNumpyArray(vorticity,simResRed)
-		currentVal = currentVal[::-1,:]
-		freqs, lowFreqs = frequency.decompose(currentVal, np.array(lowFreqRes)[0:1])
+		currentVal = currentVal[:,::-1]
+		freqs, lowFreqs = frequency.decompose(currentVal, np.array(lowFreqRes)[0:2])
 		input = lowFreqs
 	#	test = lowFreqs
 	#	test = frequency.flattenComplex(test)
@@ -167,8 +167,8 @@ def generateData(offset, batchSize):
 				currentInputBatch = []
 				currentOutputBatch = []
 
-		#	np.save("data/vorticityValidation/lowres_{:04d}".format(t), input)
-		#	np.save("data/vorticityValidation/fullres_{:04d}".format(t), currentVal)
+	#		np.save("data/vorticityLarge/lowres_{:04d}".format(t), input)
+	#		np.save("data/vorticityLarge/fullres_{:04d}".format(t), currentVal)
 		
 		# move window
 		slidingWindow[0:windowSize-1] = slidingWindow[1:]
@@ -177,20 +177,23 @@ def generateData(offset, batchSize):
 		sm.step()
 		t = t + 1
 
-#gen = generateData(512, batchSize)
+#gen = generateData(1024, batchSize)
 #for i in range(512):
 #	next(gen)
+#exit()
 
 # model setup
 # ----------------------------------------------------------------------#
+print("Setting up model.")
 lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
 inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
 model = keras.models.Sequential([
 	layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
-	layers.LSTM(inSize, activation='tanh', 
-			 stateful=True,
-			 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
-	layers.LSTM(lstmInSize,
+#	layers.TimeDistributed(layers.Dense(inSize//4)),
+#	layers.LSTM(inSize//4, activation='tanh', 
+#			 stateful=True,
+#			 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
+	layers.LSTM(inSize,
 			 stateful=True),
 #	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
 #	layers.Conv2DTranspose(3,2,strides = 1),
@@ -198,11 +201,12 @@ model = keras.models.Sequential([
 	layers.Reshape(outputRes)
 ])
 
+print("Compiling model.")
 model.compile(loss=keras.losses.MeanSquaredError(),
               optimizer=keras.optimizers.RMSprop())
 
 #model.load_weights("currentmodel/cp.ckpt")
-#model.save("vorticityStateful2.h5")
+#model.save("largeDense.h5")
 #exit()
 
 # model training
@@ -211,8 +215,8 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
                                                  save_weights_only=True,
                                                  verbose=1)
 
-history = model.fit_generator(generateData(512, batchSize),
-							  steps_per_epoch=512, 
+history = model.fit_generator(generateData(1024, batchSize),
+							  steps_per_epoch=128, 
 							  epochs=128,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)

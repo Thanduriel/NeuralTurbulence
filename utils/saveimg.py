@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 
 def arrayToImgFile(obj, path):
+	obj = obj.T
 	min = np.min(obj)
 	max = np.max(obj)
 	obj = (obj - min) / (max-min)
