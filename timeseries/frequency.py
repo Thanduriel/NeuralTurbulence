@@ -28,3 +28,30 @@ def invTransform(freqs):
 	freqs = np.fft.ifftshift(freqs)
 
 	return np.fft.ifft2(freqs)
+
+def decomposeReal(scalarField, lowPass):
+	freq = np.fft.rfftn(scalarField)
+	freq = np.fft.fftshift(freq, axes=0)
+
+	begin = (freq.shape[0] - lowPass[0]) // 2
+	end = begin + lowPass[0]
+	lowFreq = freq[begin:end,0:lowPass[1]]
+
+	return stackComplex(freq), stackComplex(lowFreq)
+
+def invTransformReal(freqs):
+	flatFreqs = flattenComplex(freqs)
+	flatFreqs = np.fft.ifftshift(flatFreqs,axes=0)
+	return np.fft.irfftn(flatFreqs)
+
+# extract symmetric parts from which a real signal can be fully constructed
+def extractSymmetric(a):
+	return a[:, a.shape[1] // 2 - 1:]
+
+def extendSymmetric(a):
+	s = a.shape
+	res = np.zeros((s[0], (s[1]-1)*2), dtype=np.complex)
+	end = res.shape[1]-s[1]
+	res[:, end:] = a
+	res[:,0:end] = a[::-1,0:end]#.real -1j * a[::-1,::-1].imag
+	return res

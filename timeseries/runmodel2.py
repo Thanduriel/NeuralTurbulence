@@ -9,7 +9,7 @@ import ioext
 from saveimg import arrayToImgFile
 
 parser = argparse.ArgumentParser(description="Runs a saved model and creates a video from its output.")
-parser.add_argument('--input', default='data/vorticityLarge/')
+parser.add_argument('--input', default='data/vorticitySym/')
 parser.add_argument('--output', default='predicted.mp4')
 parser.add_argument('model')
 parser.add_argument('--begin', type=int, default=0)
@@ -44,30 +44,29 @@ print("Found {} time frames.".format(len(inputFrames)))
 if args.predict:
 	print("Applying model.")
 	out = model.predict(inputFrames)
-
-out = np.reshape(out, (len(out),) + simRes)
+	out = np.reshape(out, (len(out),) + simRes)
 
 outputFrames = np.reshape(outputs, (len(outputs), ) + simRes);
 print("Creating images.")
 
 if args.predict:
 	for i in range(len(out)):
-		vorticity = frequency.invTransform(frequency.flattenComplex(out[i]))
+		vorticity = frequency.invTransformReal(out[i])
 		arrayToImgFile(vorticity.real, "temp/predicted_{0}.png".format(i))
 
 if args.showReference: 
 	for i in range(len(outputFrames)):
-		vorticity = frequency.invTransform(frequency.flattenComplex(outputFrames[i]))
+		vorticity = frequency.invTransformReal(outputFrames[i])
 		arrayToImgFile(vorticity.real, "temp/original_{0}.png".format(i))
 
 if args.showLowFreq: 
 	highRes = np.zeros(outputFrames[0].shape)
 	lowResSize = np.array(inputs[0].shape)
-	begin = ((np.array(highRes.shape) - lowResSize) / 2).astype(int)
-	end = (begin + lowResSize).astype(int)
+	begin = (outputFrames[0].shape[0] - lowResSize[0]) // 2
+	end = begin + lowResSize[0]
 	for i in range(len(inputs)):
-		highRes[begin[0]:end[0],begin[1]:end[1]] = inputs[i]
-		vorticity = frequency.invTransform(frequency.flattenComplex(highRes))
+		highRes[begin:end,0:lowResSize[1]] = inputs[i]
+		vorticity = frequency.invTransformReal(highRes)
 		arrayToImgFile(vorticity.real, "temp/lowfreq_{0}.png".format(i))
 
 print("Creating video.")

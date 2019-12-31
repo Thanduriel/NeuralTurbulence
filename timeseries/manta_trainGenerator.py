@@ -54,8 +54,10 @@ interval = 1
 
 simResRed = (res,res*2)
 simRes = simResRed + (1,)
-outputRes = (res,res*2,2)
-lowFreqRes = (res//2,simRes[1]//2,2) # real, imag part
+outputRes = (res,res+1,2)
+# last dimension for real, imag part
+# y // 4: use fft symmetry for real signal
+lowFreqRes = (res//2,simRes[1]//4,2)
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
@@ -148,7 +150,7 @@ def generateData(offset, batchSize):
 
 		currentVal = gridext.toNumpyArray(vorticity,simResRed)
 		currentVal = currentVal[:,::-1]
-		freqs, lowFreqs = frequency.decompose(currentVal, np.array(lowFreqRes)[0:2])
+		freqs, lowFreqs = frequency.decomposeReal(currentVal, np.array(lowFreqRes)[0:2])
 		input = lowFreqs
 	#	test = lowFreqs
 	#	test = frequency.flattenComplex(test)
@@ -167,8 +169,8 @@ def generateData(offset, batchSize):
 				currentInputBatch = []
 				currentOutputBatch = []
 
-	#		np.save("data/vorticityLarge/lowres_{:04d}".format(t), input)
-	#		np.save("data/vorticityLarge/fullres_{:04d}".format(t), currentVal)
+		#	np.save("data/vorticitySym/lowres_{:04d}".format(t), input)
+		#	np.save("data/vorticitySym/fullres_{:04d}".format(t), currentVal)
 		
 		# move window
 		slidingWindow[0:windowSize-1] = slidingWindow[1:]
@@ -206,7 +208,7 @@ model.compile(loss=keras.losses.MeanSquaredError(),
               optimizer=keras.optimizers.RMSprop())
 
 #model.load_weights("currentmodel/cp.ckpt")
-#model.save("largeDense.h5")
+#model.save("symDense1.h5")
 #exit()
 
 # model training
