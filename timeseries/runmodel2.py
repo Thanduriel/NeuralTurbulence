@@ -71,11 +71,11 @@ if args.showLowFreq:
 
 print("Creating video.")
 if args.showReference:
-	subprocess.run("ffmpeg -framerate 24 -i temp/original_%0d.png original{}.mp4".format(args.model))
+	subprocess.run("ffmpeg -framerate 24 -pix_fmt yuv420p -i temp/original_%0d.png original{}.mp4".format(args.model))
 if args.predict:
-	subprocess.run("ffmpeg -framerate 24 -i temp/predicted_%0d.png predicted{}.mp4".format(args.model))
+	subprocess.run("ffmpeg -framerate 24 -pix_fmt yuv420p -i temp/predicted_%0d.png predicted{}.mp4".format(args.model))
 if args.showLowFreq:
-	subprocess.run("ffmpeg -framerate 24 -i temp/lowfreq_%0d.png lowfreq{}.mp4".format(args.model))
+	subprocess.run("ffmpeg -framerate 24 -pix_fmt yuv420p -i temp/lowfreq_%0d.png lowfreq{}.mp4".format(args.model))
 
 def error(array1, array2):
 	dif = np.subtract(array1, array2)

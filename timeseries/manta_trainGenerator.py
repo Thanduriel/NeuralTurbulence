@@ -42,8 +42,11 @@ setDebugLevel(0)
 # NN params
 # ----------------------------------------------------------------------#
 windowSize = 4
-batchSize = 1
 lstmSize = resolution * resolution
+batchSize = 4
+
+batchDistance = 1024
+historySize = batchSize * batchDistance
 
 # Solver params
 # ----------------------------------------------------------------------#
@@ -110,9 +113,12 @@ if args.showGui:
 
 def generateData(offset, batchSize):
 	slidingWindow = np.zeros((windowSize,)+lowFreqRes)
+	# ringbuffer of previous states to create batches from
+	inputHistory = np.zeros((historySize,)+slidingWindow.shape)
+	outputHistory = np.zeros((historySize,)+outputRes)
+	historyPtr = 0
+
 	t = 0
-	currentInputBatch = []
-	currentOutputBatch = []
 	# main loop
 	# --------------------------------------------------------------------#
 	while 1:
@@ -152,29 +158,33 @@ def generateData(offset, batchSize):
 		currentVal = currentVal[:,::-1]
 		freqs, lowFreqs = frequency.decomposeReal(currentVal, np.array(lowFreqRes)[0:2])
 		input = lowFreqs
-	#	test = lowFreqs
-	#	test = frequency.flattenComplex(test)
-	#	test = frequency.invTransform(test)
-	#	print(np.linalg.norm(test-currentVal))
-		# transform complex array into extra dimensions
 		currentVal = freqs
-		if t > offset:
-			currentInputBatch.append(np.copy(slidingWindow));
-			currentOutputBatch.append(currentVal)
 
-			if(len(currentInputBatch) == batchSize):
-				inputs = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
-				outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
-				yield (inputs, outputs)
-				currentInputBatch = []
-				currentOutputBatch = []
-
-		#	np.save("data/vorticitySym/lowres_{:04d}".format(t), input)
-		#	np.save("data/vorticitySym/fullres_{:04d}".format(t), currentVal)
-		
 		# move window
 		slidingWindow[0:windowSize-1] = slidingWindow[1:]
 		slidingWindow[-1] = input
+		
+		# record history
+		if t > offset:
+			historyPtr = (historyPtr + 1) % historySize
+			inputHistory[historyPtr] = slidingWindow
+			outputHistory[historyPtr] = currentVal
+
+		# create data batches after history is full
+		if t > offset+historySize:
+			currentInputBatch = []
+			currentOutputBatch = []
+			for i in range(batchSize):
+				index = (historyPtr + i * batchDistance) % historySize
+				currentInputBatch.append(np.copy(inputHistory[index]))
+				currentOutputBatch.append(np.copy(outputHistory[index]))
+
+			inputs = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
+			outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
+			yield (inputs, outputs)
+
+		#	np.save("data/vorticitySym/lowres_{:04d}".format(t), input)
+		#	np.save("data/vorticitySym/fullres_{:04d}".format(t), currentVal)
 
 		sm.step()
 		t = t + 1
@@ -186,30 +196,36 @@ def generateData(offset, batchSize):
 
 # model setup
 # ----------------------------------------------------------------------#
+def buildModel(batchSize):
+	lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
+	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
+	model = keras.models.Sequential([
+		layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
+		layers.TimeDistributed(layers.Dense(inSize//4)),
+		layers.LSTM(inSize, activation='tanh', 
+				 stateful=True,
+				 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
+		layers.LSTM(inSize,
+				 stateful=True),
+	#	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
+	#	layers.Conv2DTranspose(3,2,strides = 1),
+		layers.Dense(lstmInSize, activation="tanh"),
+		layers.Reshape(outputRes)
+	])
+	return model
+model = buildModel(batchSize)
+#model = buildModel(1)
+#model.load_weights("currentmodel/cp.ckpt")
+#model.save("symDense4.h5")
+#exit()
+
 print("Setting up model.")
-lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
-inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
-model = keras.models.Sequential([
-	layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
-#	layers.TimeDistributed(layers.Dense(inSize//4)),
-#	layers.LSTM(inSize//4, activation='tanh', 
-#			 stateful=True,
-#			 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
-	layers.LSTM(inSize,
-			 stateful=True),
-#	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
-#	layers.Conv2DTranspose(3,2,strides = 1),
-	layers.Dense(lstmInSize),
-	layers.Reshape(outputRes)
-])
+
 
 print("Compiling model.")
 model.compile(loss=keras.losses.MeanSquaredError(),
               optimizer=keras.optimizers.RMSprop())
 
-#model.load_weights("currentmodel/cp.ckpt")
-#model.save("symDense1.h5")
-#exit()
 
 # model training
 # ----------------------------------------------------------------------#
@@ -218,8 +234,8 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
                                                  verbose=1)
 
 history = model.fit_generator(generateData(1024, batchSize),
-							  steps_per_epoch=128, 
-							  epochs=128,
+							  steps_per_epoch=256, 
+							  epochs=64,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
