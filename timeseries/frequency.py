@@ -35,7 +35,7 @@ def decomposeReal(scalarField, lowPass):
 
 	begin = (freq.shape[0] - lowPass[0]) // 2
 	end = begin + lowPass[0]
-	lowFreq = freq[begin:end,0:lowPass[1]]
+	lowFreq = freq[begin:end,0:lowPass[1] // 2 + 1]
 
 	return stackComplex(freq), stackComplex(lowFreq)
 

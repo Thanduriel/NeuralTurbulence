@@ -43,7 +43,7 @@ setDebugLevel(0)
 # ----------------------------------------------------------------------#
 windowSize = 4
 lstmSize = resolution * resolution
-batchSize = 4
+batchSize = 2
 
 batchDistance = 1024
 historySize = batchSize * batchDistance
@@ -57,10 +57,10 @@ interval = 1
 
 simResRed = (res,res*2)
 simRes = simResRed + (1,)
-outputRes = (res,res+1,2)
+outputRes = (res,res*2,1)#(res,res+1,2)
 # last dimension for real, imag part
 # y // 4: use fft symmetry for real signal
-lowFreqRes = (res//2,simRes[1]//4,2)
+lowFreqRes = (res//2,simRes[1]//2,1)
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
@@ -157,8 +157,10 @@ def generateData(offset, batchSize):
 		currentVal = gridext.toNumpyArray(vorticity,simResRed)
 		currentVal = currentVal[:,::-1]
 		freqs, lowFreqs = frequency.decomposeReal(currentVal, np.array(lowFreqRes)[0:2])
-		input = lowFreqs
-		currentVal = freqs
+		input = frequency.invTransformReal(lowFreqs)
+		#currentVal = freqs
+		input = np.reshape(input, lowFreqRes)
+		currentVal = np.reshape(currentVal, outputRes)
 
 		# move window
 		slidingWindow[0:windowSize-1] = slidingWindow[1:]
@@ -183,40 +185,74 @@ def generateData(offset, batchSize):
 			outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
 			yield (inputs, outputs)
 
-		#	np.save("data/vorticitySym/lowres_{:04d}".format(t), input)
-		#	np.save("data/vorticitySym/fullres_{:04d}".format(t), currentVal)
+			np.save("data/vorticitySymReg/lowres_{:04d}".format(t), input)
+			np.save("data/vorticitySymReg/fullres_{:04d}".format(t), currentVal)
 
 		sm.step()
 		t = t + 1
 
-#gen = generateData(1024, batchSize)
-#for i in range(512):
-#	next(gen)
-#exit()
+gen = generateData(1024, batchSize)
+for i in range(512):
+	next(gen)
+exit()
 
 # model setup
 # ----------------------------------------------------------------------#
 def buildModel(batchSize):
 	lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
 	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
-	model = keras.models.Sequential([
-		layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
-		layers.TimeDistributed(layers.Dense(inSize//4)),
-		layers.LSTM(inSize, activation='tanh', 
-				 stateful=True,
-				 return_sequences=True), # default tanh throws error "Skipping optimization due to error while loading"
-		layers.LSTM(inSize,
-				 stateful=True),
-	#	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
-	#	layers.Conv2DTranspose(3,2,strides = 1),
-		layers.Dense(lstmInSize, activation="tanh"),
-		layers.Reshape(outputRes)
-	])
+
+	inputs = keras.Input(shape=(windowSize,)+lowFreqRes,
+					  batch_size=batchSize)
+	flatInput = layers.Reshape((windowSize,inSize))(inputs)
+	x = layers.LSTM(inSize//4, activation='tanh', 
+				stateful=True,
+				return_sequences=True)(flatInput)
+	x = layers.LSTM(inSize//4,
+				 stateful=True)(x)
+	y = layers.LSTM(inSize, stateful=True)(flatInput)
+	x = layers.concatenate([x,y])
+	x = layers.Dense(lstmInSize)(x)
+	output = layers.Reshape(outputRes)(x)
+	model = keras.Model(inputs=inputs, outputs=output)
+	#model = keras.models.Sequential([
+	#	layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
+	##	layers.TimeDistributed(layers.Dense(inSize//4)),
+	#	layers.LSTM(inSize//2, activation='tanh', 
+	#			 stateful=True,
+	#			 return_sequences=True),
+	#	layers.LSTM(inSize,
+	#			 stateful=True),
+	##	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
+	##	layers.Conv2DTranspose(3,2,strides = 1),
+	#	layers.Dense(lstmInSize),
+	#	layers.Reshape(outputRes)
+	#])
 	return model
 model = buildModel(batchSize)
-#model = buildModel(1)
-#model.load_weights("currentmodel/cp.ckpt")
-#model.save("symDense4.h5")
+#modelRef = tf.keras.models.load_model("vorticity3.h5")
+#lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
+#inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
+#model = keras.models.Sequential([
+#		layers.Reshape((windowSize,inSize), batch_input_shape=(1, windowSize,)+lowFreqRes),
+#		layers.TimeDistributed(layers.Dense(inSize//4)),
+#		layers.LSTM(512, activation='tanh', 
+#				 stateful=True,
+#				 return_sequences=True),
+#		layers.LSTM(1024,
+#				 return_sequences=True,
+#				 stateful=True),
+#		layers.LSTM(2048,
+#				 stateful=True),
+#	##	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
+#	##	layers.Conv2DTranspose(3,2,strides = 1),
+#		layers.Dense(lstmInSize),
+#		layers.Reshape(outputRes)
+#	])
+##model = buildModel(1)
+#model.set_weights(modelRef.get_weights())
+##model.load_weights("currentmodel/cp.ckpt")
+#model.save("compress_s.h5")
 #exit()
 
 print("Setting up model.")
@@ -239,4 +275,7 @@ history = model.fit_generator(generateData(1024, batchSize),
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
-model.save(args.modelName)
+model.save("resReg.h5")
+modelS = buildModel(1)
+modelS.set_weights(model.get_weights())
+modelS.save("resReg_s.h5")
