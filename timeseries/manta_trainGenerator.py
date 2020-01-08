@@ -15,6 +15,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 import frequency
+import tfextensions
 sys.path.append("../utils")
 import gridext
 
@@ -41,9 +42,10 @@ setDebugLevel(0)
 
 # NN params
 # ----------------------------------------------------------------------#
-windowSize = 4
+windowSize = 1
 lstmSize = resolution * resolution
-batchSize = 2
+batchSize = 4
+learnFrequency = True
 
 batchDistance = 1024
 historySize = batchSize * batchDistance
@@ -57,10 +59,14 @@ interval = 1
 
 simResRed = (res,res*2)
 simRes = simResRed + (1,)
-outputRes = (res,res*2,1)#(res,res+1,2)
-# last dimension for real, imag part
-# y // 4: use fft symmetry for real signal
-lowFreqRes = (res//2,simRes[1]//2,1)
+if learnFrequency:
+	outputRes = (res,res+1,2)
+	# last dimension for real, imag part
+	# y // 4: use fft symmetry for real signal
+	lowFreqRes = (res//2,res//2+1,2)
+else:
+	outputRes = (res,res*2,1)
+	lowFreqRes = (res//2,simRes[1]//2,1)
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
@@ -86,7 +92,7 @@ obstacle = sm.create(Sphere, center=gs*vec3(0.5,0.4,0.5), radius=res*0.10)
 phiObs = obstacle.computeLevelset()
 setObstacleFlags(flags=flags, phiObs=phiObs)
 flags.fillGrid()
-setOpenBound(flags,	bWidth,'yY',FlagOutflow | FlagEmpty) 
+setOpenBound(flags,	bWidth,'xXyY',FlagOutflow | FlagEmpty) 
 
 # inflow sources
 # ----------------------------------------------------------------------#
@@ -157,13 +163,13 @@ def generateData(offset, batchSize):
 		currentVal = gridext.toNumpyArray(vorticity,simResRed)
 		currentVal = currentVal[:,::-1]
 		freqs, lowFreqs = frequency.decomposeReal(currentVal, np.array(lowFreqRes)[0:2])
-		input = frequency.invTransformReal(lowFreqs)
-		#currentVal = freqs
-		input = np.reshape(input, lowFreqRes)
+		#input = frequency.invTransformReal(lowFreqs)
+		currentVal = freqs
+		input = np.reshape(lowFreqs, lowFreqRes)
 		currentVal = np.reshape(currentVal, outputRes)
 
 		# move window
-		slidingWindow[0:windowSize-1] = slidingWindow[1:]
+	#	slidingWindow[0:windowSize-1] = slidingWindow[1:]
 		slidingWindow[-1] = input
 		
 		# record history
@@ -185,50 +191,61 @@ def generateData(offset, batchSize):
 			outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
 			yield (inputs, outputs)
 
-			np.save("data/vorticitySymReg/lowres_{:04d}".format(t), input)
-			np.save("data/vorticitySymReg/fullres_{:04d}".format(t), currentVal)
+		#	np.save("data/vorticitySym3/lowres_{:04d}".format(t), input)
+		#	np.save("data/vorticitySym3/fullres_{:04d}".format(t), currentVal)
 
 		sm.step()
 		t = t + 1
 
-gen = generateData(1024, batchSize)
-for i in range(512):
-	next(gen)
-exit()
+#gen = generateData(1024, batchSize)
+#for i in range(512):
+#	next(gen)
+#exit()
 
 # model setup
 # ----------------------------------------------------------------------#
+print("Setting up model.")
+
 def buildModel(batchSize):
 	lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
 	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
 
 	inputs = keras.Input(shape=(windowSize,)+lowFreqRes,
 					  batch_size=batchSize)
+#	x = layers.TimeDistributed(layers.Conv2D(32,2,2))(inputs)
+#	x = layers.TimeDistributed(layers.Conv2D(16,2,2))(x)
 	flatInput = layers.Reshape((windowSize,inSize))(inputs)
-	x = layers.LSTM(inSize//4, activation='tanh', 
+	x1 = layers.LSTM(256, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
-	x = layers.LSTM(inSize//4,
-				 stateful=True)(x)
-	y = layers.LSTM(inSize, stateful=True)(flatInput)
-	x = layers.concatenate([x,y])
+	x2 = layers.LSTM(256, stateful=True)(x1)
+	x1 = layers.Add()([x1,x2])
+	x2 = layers.LSTM(256, stateful=True)(x1)
+	x1 = layers.Add()([x1,x2])
+	x = layers.LSTM(256, stateful=True)(x1)
+#	y = layers.LSTM(inSize, stateful=True)(flatInput)
+#	x = layers.concatenate([x,y])
 	x = layers.Dense(lstmInSize)(x)
+	# extract current time input
+	forward = layers.Reshape((lowFreqRes))(inputs)
+#	forward = layers.Lambda(lambda x : x[:,-1])(inputs)
+	forward = tfextensions.UpsampleFreq(lowFreqRes, outputRes)(forward)
+#	forward = layers.UpSampling2D(interpolation='bilinear')(forward)
 	output = layers.Reshape(outputRes)(x)
+	output = layers.Add()([forward, output])
 	model = keras.Model(inputs=inputs, outputs=output)
-	#model = keras.models.Sequential([
-	#	layers.Reshape((windowSize,inSize), batch_input_shape=(batchSize, windowSize,)+lowFreqRes),
-	##	layers.TimeDistributed(layers.Dense(inSize//4)),
-	#	layers.LSTM(inSize//2, activation='tanh', 
-	#			 stateful=True,
-	#			 return_sequences=True),
-	#	layers.LSTM(inSize,
-	#			 stateful=True),
-	##	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
-	##	layers.Conv2DTranspose(3,2,strides = 1),
-	#	layers.Dense(lstmInSize),
-	#	layers.Reshape(outputRes)
-	#])
+
+	if learnFrequency:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop(),
+			metrics=['mse', tfextensions.complexMSE])
+	else:
+		odel.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.Adam(epsilon=0.1),
+			metrics=['mse', tfextensions.frequencyLoss])
+
 	return model
+
 model = buildModel(batchSize)
 #modelRef = tf.keras.models.load_model("vorticity3.h5")
 #lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
@@ -255,27 +272,21 @@ model = buildModel(batchSize)
 #model.save("compress_s.h5")
 #exit()
 
-print("Setting up model.")
-
-
-print("Compiling model.")
-model.compile(loss=keras.losses.MeanSquaredError(),
-              optimizer=keras.optimizers.RMSprop())
-
 
 # model training
 # ----------------------------------------------------------------------#
+print("Starting training.")
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt",
                                                  save_weights_only=True,
                                                  verbose=1)
 
 history = model.fit_generator(generateData(1024, batchSize),
-							  steps_per_epoch=256, 
-							  epochs=64,
+							  steps_per_epoch=512, 
+							  epochs=16,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
-model.save("resReg.h5")
+#model.save("resSimple.h5")
 modelS = buildModel(1)
 modelS.set_weights(model.get_weights())
-modelS.save("resReg_s.h5")
+modelS.save("freqRes2.h5")

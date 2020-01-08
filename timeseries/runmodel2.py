@@ -6,10 +6,11 @@ import subprocess
 import frequency
 sys.path.append("../utils")
 import ioext
+import tfextensions
 from saveimg import arrayToImgFile
 
 parser = argparse.ArgumentParser(description="Runs a saved model and creates a video from its output.")
-parser.add_argument('--input', default='data/vorticitySymReg/')
+parser.add_argument('--input', default='data/vorticitySymReg2/')
 parser.add_argument('--output', default='predicted.mp4')
 parser.add_argument('model')
 parser.add_argument('--begin', type=int, default=0)
@@ -27,24 +28,25 @@ args = parser.parse_args()
 
 # load model now to read the size config
 print("Loading model.")
-model = tf.keras.models.load_model(args.model)
+model = tf.keras.models.load_model(args.model, tfextensions.functionMap)
 timeFrame = model.input_shape[1]
 isFrequency = model.input_shape[4] == 2
 
 print("Loading data.")
-
-inputs = ioext.loadNPData(args.input + "lowres_*.npy")
-print(inputs[0].shape)
+if isFrequency:
+	path = "data/vorticitySym2/"
+else:
+	path = "data/vorticitySymReg2/"
+inputs = ioext.loadNPData(path + "lowres_*.npy")
 inputFrames, lowRes = ioext.createTimeSeries(inputs, timeFrame)
-print(inputFrames.shape)
 inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
-outputs = ioext.loadNPData(args.input + "fullres_*.npy")
+outputs = ioext.loadNPData(path + "fullres_*.npy")
 simRes = outputs[0].shape
 outputs = outputs[args.begin:]
 
 print("Found {} time frames.".format(len(inputFrames)))
 
-if args.predict:
+if args.predict or args.computeError:
 	print("Applying model.")
 	out = model.predict(inputFrames)
 	out = np.reshape(out, (len(out),) + simRes)
