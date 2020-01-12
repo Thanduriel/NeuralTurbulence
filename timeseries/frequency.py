@@ -2,8 +2,9 @@ import numpy as np
 
 # converts a complex 2d array into a 3d real array
 def stackComplex(a):
-	re = np.reshape(a.real, a.shape + (1,))
-	im = np.reshape(a.imag, a.shape + (1,))
+	shape = (a.shape[0], a.shape[1], 1)
+	re = np.reshape(a.real, shape)
+	im = np.reshape(a.imag, shape)
 
 	return np.concatenate((re,im), axis=2)
 
@@ -44,14 +45,34 @@ def invTransformReal(freqs):
 	flatFreqs = np.fft.ifftshift(flatFreqs,axes=0)
 	return np.fft.irfftn(flatFreqs)
 
-# extract symmetric parts from which a real signal can be fully constructed
-def extractSymmetric(a):
-	return a[:, a.shape[1] // 2 - 1:]
+def shrink(freqs, lowPass):
+	begin = (freqs.shape[0] - lowPass[0]) // 2
+	end = begin + lowPass[0]
 
-def extendSymmetric(a):
-	s = a.shape
-	res = np.zeros((s[0], (s[1]-1)*2), dtype=np.complex)
-	end = res.shape[1]-s[1]
-	res[:, end:] = a
-	res[:,0:end] = a[::-1,0:end]#.real -1j * a[::-1,::-1].imag
-	return res
+	redSize = freqs.shape[0]*freqs.shape[1] - lowPass[0] * lowPass[1]
+	flatFreqs = np.zeros((redSize,2))
+	ind = 0
+	for y in range(freqs.shape[1]):
+		for x in range(freqs.shape[0]):
+			if x < begin or x >= end or y >= lowPass[1]:
+				flatFreqs[ind,:] = freqs[x,y,:]
+				ind += 1
+
+	return flatFreqs
+
+def composeReal(highFreqs, lowFreqs, highFreqShape):
+	begin = (highFreqShape[0] - lowFreqs.shape[0]) // 2
+	end = begin + lowFreqs.shape[0]
+
+	freqs = np.zeros(highFreqShape)
+
+	ind = 0
+	for y in range(highFreqShape[1]):
+		for x in range(highFreqShape[0]):
+			if x < begin or x >= end or y >= lowFreqs.shape[1]:
+				freqs[x,y,:] = highFreqs[ind,:]
+				ind += 1
+
+	freqs[begin:end,0:lowFreqs.shape[1]] = lowFreqs
+
+	return freqs

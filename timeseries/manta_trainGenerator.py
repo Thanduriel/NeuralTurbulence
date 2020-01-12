@@ -50,6 +50,8 @@ learnFrequency = True
 batchDistance = 1024
 historySize = batchSize * batchDistance
 
+useReducedOutput = True
+
 # Solver params
 # ----------------------------------------------------------------------#
 res = resolution
@@ -60,10 +62,12 @@ interval = 1
 simResRed = (res,res*2)
 simRes = simResRed + (1,)
 if learnFrequency:
-	outputRes = (res,res+1,2)
+	if useReducedOutput:
+		outputRes = (res*(res+1) - res//4*(res//4+1), 2, 1)
+	else:
+		outputRes = (res,res+1,2)
 	# last dimension for real, imag part
-	# y // 4: use fft symmetry for real signal
-	lowFreqRes = (res//2,res//2+1,2)
+	lowFreqRes = (res//4,res//4+1,2)
 else:
 	outputRes = (res,res*2,1)
 	lowFreqRes = (res//2,simRes[1]//2,1)
@@ -122,6 +126,7 @@ def generateData(offset, batchSize):
 	# ringbuffer of previous states to create batches from
 	inputHistory = np.zeros((historySize,)+slidingWindow.shape)
 	outputHistory = np.zeros((historySize,)+outputRes)
+	lowPass = np.array(lowFreqRes)[0:2]
 	historyPtr = 0
 
 	t = 0
@@ -162,14 +167,17 @@ def generateData(offset, batchSize):
 
 		currentVal = gridext.toNumpyArray(vorticity,simResRed)
 		currentVal = currentVal[:,::-1]
-		freqs, lowFreqs = frequency.decomposeReal(currentVal, np.array(lowFreqRes)[0:2])
+		
+		freqs, lowFreqs = frequency.decomposeReal(currentVal, lowPass)
 		#input = frequency.invTransformReal(lowFreqs)
 		currentVal = freqs
 		input = np.reshape(lowFreqs, lowFreqRes)
+		if useReducedOutput:
+			currentVal = frequency.shrink(currentVal, lowPass)
 		currentVal = np.reshape(currentVal, outputRes)
 
 		# move window
-	#	slidingWindow[0:windowSize-1] = slidingWindow[1:]
+		slidingWindow[0:windowSize-1] = slidingWindow[1:]
 		slidingWindow[-1] = input
 		
 		# record history
@@ -207,7 +215,7 @@ def generateData(offset, batchSize):
 print("Setting up model.")
 
 def buildModel(batchSize):
-	lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
+	outputSize = outputRes[0]*outputRes[1]*outputRes[2]
 	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
 
 	inputs = keras.Input(shape=(windowSize,)+lowFreqRes,
@@ -218,21 +226,21 @@ def buildModel(batchSize):
 	x1 = layers.LSTM(256, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
-	x2 = layers.LSTM(256, stateful=True)(x1)
+	x2 = layers.LSTM(256, stateful=True, return_sequences=True)(x1)
 	x1 = layers.Add()([x1,x2])
-	x2 = layers.LSTM(256, stateful=True)(x1)
+	x2 = layers.LSTM(256, stateful=True, return_sequences=True)(x1)
 	x1 = layers.Add()([x1,x2])
 	x = layers.LSTM(256, stateful=True)(x1)
 #	y = layers.LSTM(inSize, stateful=True)(flatInput)
 #	x = layers.concatenate([x,y])
-	x = layers.Dense(lstmInSize)(x)
+	x = layers.Dense(outputSize)(x)
 	# extract current time input
-	forward = layers.Reshape((lowFreqRes))(inputs)
+#	forward = layers.Reshape((lowFreqRes))(inputs)
 #	forward = layers.Lambda(lambda x : x[:,-1])(inputs)
-	forward = tfextensions.UpsampleFreq(lowFreqRes, outputRes)(forward)
+#	forward = tfextensions.UpsampleFreq(lowFreqRes, outputRes)(forward)
 #	forward = layers.UpSampling2D(interpolation='bilinear')(forward)
 	output = layers.Reshape(outputRes)(x)
-	output = layers.Add()([forward, output])
+#	output = layers.Add()([forward, output])
 	model = keras.Model(inputs=inputs, outputs=output)
 
 	if learnFrequency:
@@ -247,31 +255,6 @@ def buildModel(batchSize):
 	return model
 
 model = buildModel(batchSize)
-#modelRef = tf.keras.models.load_model("vorticity3.h5")
-#lstmInSize = outputRes[0]*outputRes[1]*outputRes[2]
-#inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
-#model = keras.models.Sequential([
-#		layers.Reshape((windowSize,inSize), batch_input_shape=(1, windowSize,)+lowFreqRes),
-#		layers.TimeDistributed(layers.Dense(inSize//4)),
-#		layers.LSTM(512, activation='tanh', 
-#				 stateful=True,
-#				 return_sequences=True),
-#		layers.LSTM(1024,
-#				 return_sequences=True,
-#				 stateful=True),
-#		layers.LSTM(2048,
-#				 stateful=True),
-#	##	layers.Reshape((lowFreqRes[0],lowFreqRes[1], 4)),
-#	##	layers.Conv2DTranspose(3,2,strides = 1),
-#		layers.Dense(lstmInSize),
-#		layers.Reshape(outputRes)
-#	])
-##model = buildModel(1)
-#model.set_weights(modelRef.get_weights())
-##model.load_weights("currentmodel/cp.ckpt")
-#model.save("compress_s.h5")
-#exit()
-
 
 # model training
 # ----------------------------------------------------------------------#
@@ -282,11 +265,11 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
 
 history = model.fit_generator(generateData(1024, batchSize),
 							  steps_per_epoch=512, 
-							  epochs=16,
+							  epochs=64,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
 #model.save("resSimple.h5")
 modelS = buildModel(1)
 modelS.set_weights(model.get_weights())
-modelS.save("freqRes2.h5")
+modelS.save("highFreqs.h5")

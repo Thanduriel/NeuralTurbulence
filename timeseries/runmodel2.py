@@ -36,7 +36,7 @@ print("Loading data.")
 if isFrequency:
 	path = "data/vorticitySym2/"
 else:
-	path = "data/vorticitySymReg2/"
+	path = "data/vorticitySymReg/"
 inputs = ioext.loadNPData(path + "lowres_*.npy")
 inputFrames, lowRes = ioext.createTimeSeries(inputs, timeFrame)
 inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
@@ -88,15 +88,28 @@ if args.predict:
 if args.showLowFreq:
 	subprocess.run("ffmpeg -framerate 24 -i temp/lowfreq_%0d.png -vf format=yuv420p lowfreq{}.mp4".format(args.model))
 
-def error(array1, array2):
+def mse(array1, array2):
 	dif = np.subtract(array1, array2)
-	return np.linalg.norm(dif.flatten(), ord=2)
+	return np.mean(np.square(dif))#np.linalg.norm(dif.flatten(), ord=2)
+
+def complexError(array1, array2):
+	dif = np.subtract(frequency.flattenComplex(array1), frequency.flattenComplex(array2))
+
+	return np.mean(np.abs(dif))
+
+if isFrequency:
+	invTransformFn = lambda x : x
+else:
+	invTransformFn = lambda x : frequency.stackComplex(np.fft.fftshift(np.fft.rfftn(x), axes=0))
+
 
 if args.computeError:
-	total = 0
+	totalMSE = 0
+	totalF = 0
 	for i in range(len(out)):
-	#	print(error(out[i], outputFrames[i]))
-		total += error(out[i], outputFrames[i])
-	print("avg loss: {}.".format(total / len(out)))
+		totalMSE += mse(transformFn(out[i]), transformFn(outputFrames[i]))
+		totalF += complexError(invTransformFn(out[i]), invTransformFn(outputFrames[i]))
+	print("mse: {}.".format(totalMSE / len(out)))
+	print("freq: {}.".format(totalF / len(out)))
 
 print("Done.")

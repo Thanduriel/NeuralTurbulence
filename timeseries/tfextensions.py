@@ -39,6 +39,39 @@ class UpsampleFreq(layers.Layer):
 	def call(self, inputs):
 		return tf.pad(inputs, self.paddings)
 
+class OrderFreqs(layers.Layer):
+
+	def __init__(self, inputRes, outputRes, **kwargs):
+		super(OrderFreqs, self).__init__(**kwargs)
+		self.inputRes = inputRes
+		self.outputRes = outputRes
+		self.lowFreqs = tf.zeros(outputRes.shape)
+		begin = (outputRes[0] - inputRes[0]) // 2
+		end = begin + inputRes[0]
+		indsHigh = []
+		indsLow = []
+		ind = 0
+		for x in range(outputRes[0]):
+			for y in range(outputRes[1]):
+				ind += 1
+				if x >= begin and x < end and y < inputRes[1]:
+					indsLow.append(ind)
+				else:
+				   indsHigh.append(ind)
+
+
+	def get_config(self):
+		config = super(OrderFreqs, self).get_config()
+		config.update({'inputRes': self.inputRes,
+				 'outputRes': self.outputRes})
+
+		return config
+
+
+
+	def call(self, inputs):
+		return tf.dynamic_stitch(indices, inputs)
+
 
 functionMap = {'frequencyLoss' : frequencyLoss,
 			   'complexMSE' : complexMSE,
