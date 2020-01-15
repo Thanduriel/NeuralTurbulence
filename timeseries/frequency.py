@@ -65,12 +65,14 @@ def composeReal(highFreqs, lowFreqs, highFreqShape):
 	end = begin + lowFreqs.shape[0]
 
 	freqs = np.zeros(highFreqShape)
+	if(highFreqs.shape[-1] == 1):
+		highFreqs = np.reshape(highFreqs, (highFreqs.shape[:-1]))
 
 	ind = 0
 	for y in range(highFreqShape[1]):
 		for x in range(highFreqShape[0]):
 			if x < begin or x >= end or y >= lowFreqs.shape[1]:
-				freqs[x,y,:] = highFreqs[ind,:]
+				freqs[x,y] = highFreqs[ind]
 				ind += 1
 
 	freqs[begin:end,0:lowFreqs.shape[1]] = lowFreqs

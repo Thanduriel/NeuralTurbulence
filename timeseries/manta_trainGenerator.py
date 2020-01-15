@@ -42,7 +42,7 @@ setDebugLevel(0)
 
 # NN params
 # ----------------------------------------------------------------------#
-windowSize = 1
+windowSize = 4
 lstmSize = resolution * resolution
 batchSize = 4
 learnFrequency = True
@@ -51,6 +51,7 @@ batchDistance = 1024
 historySize = batchSize * batchDistance
 
 useReducedOutput = True
+useLagWindows = False
 
 # Solver params
 # ----------------------------------------------------------------------#
@@ -130,6 +131,7 @@ def generateData(offset, batchSize):
 	historyPtr = 0
 
 	t = 0
+	beginYield = offset + historySize * (1 if useLagWindows else windowSize)
 	# main loop
 	# --------------------------------------------------------------------#
 	while 1:
@@ -181,32 +183,32 @@ def generateData(offset, batchSize):
 		slidingWindow[-1] = input
 		
 		# record history
-		if t > offset:
+		if t > offset and (t % windowSize == 0 or useLagWindows):
 			historyPtr = (historyPtr + 1) % historySize
 			inputHistory[historyPtr] = slidingWindow
 			outputHistory[historyPtr] = currentVal
 
-		# create data batches after history is full
-		if t > offset+historySize:
-			currentInputBatch = []
-			currentOutputBatch = []
-			for i in range(batchSize):
-				index = (historyPtr + i * batchDistance) % historySize
-				currentInputBatch.append(np.copy(inputHistory[index]))
-				currentOutputBatch.append(np.copy(outputHistory[index]))
+			# create data batches after history is full
+			if t > beginYield:
+				currentInputBatch = []
+				currentOutputBatch = []
+				for i in range(batchSize):
+					index = (historyPtr + i * batchDistance) % historySize
+					currentInputBatch.append(np.copy(inputHistory[index]))
+					currentOutputBatch.append(np.copy(outputHistory[index]))
 
-			inputs = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
-			outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
-			yield (inputs, outputs)
+				inputs = np.reshape(currentInputBatch, (batchSize,)+slidingWindow.shape)
+				outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
+				yield (inputs, outputs)
 
-		#	np.save("data/vorticitySym3/lowres_{:04d}".format(t), input)
-		#	np.save("data/vorticitySym3/fullres_{:04d}".format(t), currentVal)
+		#	np.save("data/bla/lowres_{:04d}".format(t), input)
+		#	np.save("data/bla/fullres_{:04d}".format(t), currentVal)
 
 		sm.step()
 		t = t + 1
 
 #gen = generateData(1024, batchSize)
-#for i in range(512):
+#for i in range(1024):
 #	next(gen)
 #exit()
 
@@ -214,7 +216,7 @@ def generateData(offset, batchSize):
 # ----------------------------------------------------------------------#
 print("Setting up model.")
 
-def buildModel(batchSize):
+def buildModel(batchSize, windowSize):
 	outputSize = outputRes[0]*outputRes[1]*outputRes[2]
 	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
 
@@ -223,14 +225,16 @@ def buildModel(batchSize):
 #	x = layers.TimeDistributed(layers.Conv2D(32,2,2))(inputs)
 #	x = layers.TimeDistributed(layers.Conv2D(16,2,2))(x)
 	flatInput = layers.Reshape((windowSize,inSize))(inputs)
-	x1 = layers.LSTM(256, activation='tanh', 
+	first = layers.LSTM(512, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
+	x1 = layers.LSTM(256, stateful=True, return_sequences=True)(first)
+#	x1 = layers.Add()([x1,x2])
 	x2 = layers.LSTM(256, stateful=True, return_sequences=True)(x1)
 	x1 = layers.Add()([x1,x2])
-	x2 = layers.LSTM(256, stateful=True, return_sequences=True)(x1)
-	x1 = layers.Add()([x1,x2])
-	x = layers.LSTM(256, stateful=True)(x1)
+	x = layers.LSTM(512, stateful=True)(x1)
+	first = layers.Lambda(lambda x : x[:,-1])(first)
+	x = layers.Add()([first,x])
 #	y = layers.LSTM(inSize, stateful=True)(flatInput)
 #	x = layers.concatenate([x,y])
 	x = layers.Dense(outputSize)(x)
@@ -254,7 +258,7 @@ def buildModel(batchSize):
 
 	return model
 
-model = buildModel(batchSize)
+model = buildModel(batchSize,windowSize)
 
 # model training
 # ----------------------------------------------------------------------#
@@ -265,11 +269,11 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
 
 history = model.fit_generator(generateData(1024, batchSize),
 							  steps_per_epoch=512, 
-							  epochs=64,
+							  epochs=100,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
-#model.save("resSimple.h5")
-modelS = buildModel(1)
+#model.save("highFreqsHourglassGRUBigLearn.h5")
+modelS = buildModel(1,1)
 modelS.set_weights(model.get_weights())
-modelS.save("highFreqs.h5")
+modelS.save("highFreqsHourglassWindows.h5")
