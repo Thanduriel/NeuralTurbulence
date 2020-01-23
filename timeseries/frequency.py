@@ -78,3 +78,16 @@ def composeReal(highFreqs, lowFreqs, highFreqShape):
 	freqs[begin:end,0:lowFreqs.shape[1]] = lowFreqs
 
 	return freqs
+
+def getSpectrum(field, axis):
+	field = flattenComplex(field)
+	field = np.fft.ifftshift(field,axes=0)
+	powerSpectrum = np.abs(field)**2
+	powerSpectrum = np.sum(powerSpectrum, axis=(1 if axis == 0 else 0))
+
+	freqs = np.fft.rfftfreq(field.shape[axis])
+	idx = np.argsort(freqs)
+
+	return freqs[idx], powerSpectrum[idx]
+
+#	columns = np.fft.rfftfreq(freqs.shape[1])

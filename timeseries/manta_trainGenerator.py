@@ -11,6 +11,7 @@ import sys
 import time
 import argparse
 import numpy as np
+from enum import Enum
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -42,16 +43,25 @@ setDebugLevel(0)
 
 # NN params
 # ----------------------------------------------------------------------#
-windowSize = 4
+windowSize = 2
 lstmSize = resolution * resolution
 batchSize = 4
-learnFrequency = True
 
 batchDistance = 1024
 historySize = batchSize * batchDistance
 
+inOutScale = 4
+
+class Format(Enum):
+    SPATIAL = 1
+    FREQUENCY = 2
+
+inputFormat = Format.FREQUENCY
+outputFormat = Format.SPATIAL
+# only expect low frequency components
 useReducedOutput = True
 useLagWindows = False
+#useFrequencyOutput = False
 
 # Solver params
 # ----------------------------------------------------------------------#
@@ -59,19 +69,24 @@ res = resolution
 dim = 2 
 offset = 20
 interval = 1
+useMovingObstacle = False
+useVaryingInflow = False
 
+resIn = res // inOutScale
 simResRed = (res,res*2)
 simRes = simResRed + (1,)
-if learnFrequency:
-	if useReducedOutput:
-		outputRes = (res*(res+1) - res//4*(res//4+1), 2, 1)
-	else:
-		outputRes = (res,res+1,2)
+
+if inputFormat == Format.FREQUENCY:
 	# last dimension for real, imag part
-	lowFreqRes = (res//4,res//4+1,2)
-else:
-	outputRes = (res,res*2,1)
-	lowFreqRes = (res//2,simRes[1]//2,1)
+	lowFreqRes = (resIn,resIn+1,2)
+elif inputFormat == Format.SPATIAL:
+	lowFreqRes = (resIn,simRes[1]//inOutScale,1)
+
+if outputFormat == Format.FREQUENCY:
+	outputRes = (res*(res+1) - resIn*(resIn+1), 2, 1)
+elif outputFormat == Format.SPATIAL:
+	outputRes = simRes
+	
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
 
@@ -88,23 +103,26 @@ vorticity = sm.create(RealGrid)
 density = sm.create(RealGrid)
 pressure = sm.create(RealGrid)
 divergence = sm.create(RealGrid)
+#obsVel  = s.create(MACGrid)
 velReconstructed = sm.create(MACGrid)
 
 # open boundaries
 bWidth = 1
 flags.initDomain(boundaryWidth=bWidth)
+
+#obsPos = gs*vec3(0.5,0.4,0.5)
+#obsVel.setBound(value=Vec3(0.), boundaryWidth=bWidth+1) # make sure walls are static
+#obs = "dummy"; phiObs = "dummy2"
 obstacle = sm.create(Sphere, center=gs*vec3(0.5,0.4,0.5), radius=res*0.10)
 phiObs = obstacle.computeLevelset()
 setObstacleFlags(flags=flags, phiObs=phiObs)
+
 flags.fillGrid()
 setOpenBound(flags,	bWidth,'xXyY',FlagOutflow | FlagEmpty) 
-
 # inflow sources
 # ----------------------------------------------------------------------#
 if(npSeed != 0): np.random.seed(npSeed)
 
-# note - world space velocity, convert to grid space later
-velInflow = vec3(np.random.uniform(-0.02,0.02), 0, 0)
 
 # inflow noise field
 noise = NoiseField( parent=sm, fixedSeed = np.random.randint(2**30), loadFromFile=True)
@@ -129,6 +147,7 @@ def generateData(offset, batchSize):
 	outputHistory = np.zeros((historySize,)+outputRes)
 	lowPass = np.array(lowFreqRes)[0:2]
 	historyPtr = 0
+	velInflow = vec3(np.random.uniform(-0.02,0.02), 0, 0)
 
 	t = 0
 	beginYield = offset + historySize * (1 if useLagWindows else windowSize)
@@ -143,9 +162,13 @@ def generateData(offset, batchSize):
 
 	#	if (sm.timeTotal>=0 and sm.timeTotal<offset):
 		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
-		#	sourceVel.applyToGrid( grid=vel , value=(velInflow*float(res)) )
+		if useVaryingInflow:
+			if t % 867:
+				velInflow = vec3(np.random.uniform(-0.01,0.01), 0, 0)
+			source.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
 	#	resetOutflow( flags=flags, real=density )
+
 	#	vorticityConfinement(vel=vel, flags=flags, strength=0.05)
 		setWallBcs(flags=flags, vel=vel)
 		addBuoyancy(density=density, vel=vel, gravity=buoy , flags=flags)
@@ -173,9 +196,19 @@ def generateData(offset, batchSize):
 		freqs, lowFreqs = frequency.decomposeReal(currentVal, lowPass)
 		#input = frequency.invTransformReal(lowFreqs)
 		currentVal = freqs
-		input = np.reshape(lowFreqs, lowFreqRes)
+		if inputFormat == Format.SPATIAL:
+			input = frequency.invTransformReal(freqs)
+		else:
+			input = lowFreqs
+		input = np.reshape(input, lowFreqRes)
+
 		if useReducedOutput:
 			currentVal = frequency.shrink(currentVal, lowPass)
+			if outputFormat == Format.SPATIAL:
+				currentVal = frequency.invTransformReal(frequency.composeReal(currentVal, np.zeros(lowFreqs.shape), freqs.shape))
+		else:
+			if outputFormat == Format.SPATIAL:
+				currentVal = frequency.invTransformReal(currentVal)
 		currentVal = np.reshape(currentVal, outputRes)
 
 		# move window
@@ -201,14 +234,15 @@ def generateData(offset, batchSize):
 				outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
 				yield (inputs, outputs)
 
-		#	np.save("data/bla/lowres_{:04d}".format(t), input)
-		#	np.save("data/bla/fullres_{:04d}".format(t), currentVal)
+	#	if t > beginYield:
+	#		np.save("data/valid_4_f_sr/lowres_{:04d}".format(t), input)
+	#		np.save("data/valid_4_f_sr/fullres_{:04d}".format(t), currentVal)
 
 		sm.step()
 		t = t + 1
 
 #gen = generateData(1024, batchSize)
-#for i in range(1024):
+#for i in range(1000):
 #	next(gen)
 #exit()
 
@@ -232,12 +266,23 @@ def buildModel(batchSize, windowSize):
 #	x1 = layers.Add()([x1,x2])
 	x2 = layers.LSTM(256, stateful=True, return_sequences=True)(x1)
 	x1 = layers.Add()([x1,x2])
-	x = layers.LSTM(512, stateful=True)(x1)
-	first = layers.Lambda(lambda x : x[:,-1])(first)
+	x = layers.LSTM(512, stateful=True, return_sequences=True)(x1)
+#	x = layers.Add()([first,x])
+#	x = layers.LSTM(512, stateful=True)(x)
+#	first = layers.Lambda(lambda x : x[:,-1])(first)
 	x = layers.Add()([first,x])
+	x = layers.LSTM(512, stateful=True, return_sequences=False)(x)
+	x = layers.Reshape((1,1,512))(x)
+	x = layers.Conv2DTranspose(64, 16, strides=(2,4), padding='same')(x)
+	x = layers.Conv2DTranspose(32, 16, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 16, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(8, 16, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(4, 16, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(1, 16, strides=(2,2), padding='same')(x)
 #	y = layers.LSTM(inSize, stateful=True)(flatInput)
 #	x = layers.concatenate([x,y])
-	x = layers.Dense(outputSize)(x)
+#	x = layers.Dense(1024, activation='tanh')(x)
+#	x = layers.Dense(outputSize)(x)
 	# extract current time input
 #	forward = layers.Reshape((lowFreqRes))(inputs)
 #	forward = layers.Lambda(lambda x : x[:,-1])(inputs)
@@ -247,18 +292,19 @@ def buildModel(batchSize, windowSize):
 #	output = layers.Add()([forward, output])
 	model = keras.Model(inputs=inputs, outputs=output)
 
-	if learnFrequency:
+	if outputFormat == Format.SPATIAL:
 		model.compile(loss=keras.losses.mse,
 			optimizer=keras.optimizers.RMSprop(),
-			metrics=['mse', tfextensions.complexMSE])
+			metrics=[tfextensions.frequencyLoss])
 	else:
-		odel.compile(loss=keras.losses.mse,
-			optimizer=keras.optimizers.Adam(epsilon=0.1),
-			metrics=['mse', tfextensions.frequencyLoss])
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop(),
+			metrics=[tfextensions.frequencyLoss])
 
 	return model
 
 model = buildModel(batchSize,windowSize)
+#model = tf.keras.models.load_model("highFreqsOutW8B4Learn.h5", tfextensions.functionMap)
 
 # model training
 # ----------------------------------------------------------------------#
@@ -273,7 +319,7 @@ history = model.fit_generator(generateData(1024, batchSize),
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
-#model.save("highFreqsHourglassGRUBigLearn.h5")
+#model.save("highFreqsShortW8B4Learn.h5")
 modelS = buildModel(1,1)
 modelS.set_weights(model.get_weights())
-modelS.save("highFreqsHourglassWindows.h5")
+modelS.save("highFreqsDeConvW1B4.h5")
