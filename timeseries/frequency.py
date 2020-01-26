@@ -83,9 +83,14 @@ def getSpectrum(field, axis):
 	field = flattenComplex(field)
 	field = np.fft.ifftshift(field,axes=0)
 	powerSpectrum = np.abs(field)**2
-	powerSpectrum = np.sum(powerSpectrum, axis=(1 if axis == 0 else 0))
 
-	freqs = np.fft.rfftfreq(field.shape[axis])
+	if axis == 0:
+		powerSpectrum = np.sum(powerSpectrum, axis=1)
+		freqs = np.fft.fftfreq(field.shape[axis])
+	elif axis == 1:
+		powerSpectrum = np.sum(powerSpectrum, axis=0)
+		freqs = np.fft.rfftfreq(field.shape[axis])
+
 	idx = np.argsort(freqs)
 
 	return freqs[idx], powerSpectrum[idx]

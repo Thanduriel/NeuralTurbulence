@@ -43,7 +43,7 @@ setDebugLevel(0)
 
 # NN params
 # ----------------------------------------------------------------------#
-windowSize = 2
+windowSize = 4
 lstmSize = resolution * resolution
 batchSize = 4
 
@@ -195,15 +195,14 @@ def generateData(offset, batchSize):
 		
 		freqs, lowFreqs = frequency.decomposeReal(currentVal, lowPass)
 		#input = frequency.invTransformReal(lowFreqs)
-		currentVal = freqs
 		if inputFormat == Format.SPATIAL:
-			input = frequency.invTransformReal(freqs)
+			input = frequency.invTransformReal(lowFreqs)
 		else:
 			input = lowFreqs
 		input = np.reshape(input, lowFreqRes)
 
 		if useReducedOutput:
-			currentVal = frequency.shrink(currentVal, lowPass)
+			currentVal = frequency.shrink(freqs, lowPass)
 			if outputFormat == Format.SPATIAL:
 				currentVal = frequency.invTransformReal(frequency.composeReal(currentVal, np.zeros(lowFreqs.shape), freqs.shape))
 		else:
@@ -273,12 +272,12 @@ def buildModel(batchSize, windowSize):
 	x = layers.Add()([first,x])
 	x = layers.LSTM(512, stateful=True, return_sequences=False)(x)
 	x = layers.Reshape((1,1,512))(x)
-	x = layers.Conv2DTranspose(64, 16, strides=(2,4), padding='same')(x)
-	x = layers.Conv2DTranspose(32, 16, strides=(2,2), padding='same')(x)
-	x = layers.Conv2DTranspose(16, 16, strides=(2,2), padding='same')(x)
-	x = layers.Conv2DTranspose(8, 16, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(64, (2,4), strides=(1,1))(x)
+	x = layers.Conv2DTranspose(32, 2, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 4, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(8, 8, strides=(2,2), padding='same')(x)
 	x = layers.Conv2DTranspose(4, 16, strides=(2,2), padding='same')(x)
-	x = layers.Conv2DTranspose(1, 16, strides=(2,2), padding='same')(x)
+	output = layers.Conv2DTranspose(1, 16, strides=(2,2), padding='same')(x)
 #	y = layers.LSTM(inSize, stateful=True)(flatInput)
 #	x = layers.concatenate([x,y])
 #	x = layers.Dense(1024, activation='tanh')(x)
@@ -288,7 +287,7 @@ def buildModel(batchSize, windowSize):
 #	forward = layers.Lambda(lambda x : x[:,-1])(inputs)
 #	forward = tfextensions.UpsampleFreq(lowFreqRes, outputRes)(forward)
 #	forward = layers.UpSampling2D(interpolation='bilinear')(forward)
-	output = layers.Reshape(outputRes)(x)
+#	output = layers.Reshape(outputRes)(x)
 #	output = layers.Add()([forward, output])
 	model = keras.Model(inputs=inputs, outputs=output)
 
@@ -315,11 +314,11 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
 
 history = model.fit_generator(generateData(1024, batchSize),
 							  steps_per_epoch=512, 
-							  epochs=100,
+							  epochs=200,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
 #model.save("highFreqsShortW8B4Learn.h5")
 modelS = buildModel(1,1)
 modelS.set_weights(model.get_weights())
-modelS.save("highFreqsDeConvW1B4.h5")
+modelS.save("highFreqsDeConvW1B4_2.h5")
