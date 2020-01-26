@@ -43,6 +43,7 @@ setDebugLevel(0)
 
 # NN params
 # ----------------------------------------------------------------------#
+modelName = "highFreqsDeconv"
 windowSize = 4
 lstmSize = resolution * resolution
 batchSize = 4
@@ -321,4 +322,5 @@ history = model.fit_generator(generateData(1024, batchSize),
 #model.save("highFreqsShortW8B4Learn.h5")
 modelS = buildModel(1,1)
 modelS.set_weights(model.get_weights())
-modelS.save("highFreqsDeConvW1B4_2.h5")
+modelS.save("backup.h5")
+modelS.save("modelName_W{}_B{}.h5".format(windowSize, batchSize))
