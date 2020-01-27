@@ -36,18 +36,25 @@ args.computeError = args.computeError or args.powerSpectrum
 print("Loading model.")
 model = tf.keras.models.load_model(args.models[0], tfextensions.functionMap)
 timeFrame = model.input_shape[1]
-inputIsFrequency = model.input_shape[-1] == 2
-outputIsFrequency = model.output_shape[-1] == 2
+inputIsFrequency = model.input_shape[-1] == 2 or model.input_shape[-2] == 2
+outputIsFrequency = model.output_shape[-1] == 2 or model.output_shape[-2] == 2
+print("Detected frequency input: {}".format(inputIsFrequency))
 print("Detected frequency output: {}".format(outputIsFrequency))
 # currently no automatic identification possible
 hasReducedOutput = True
-powerSpectrumAxis = 1
+powerSpectrumAxis = 0
 
 print("Loading data.")
 if outputIsFrequency:
-	dataName = "validHighFreqs"
+	if inputIsFrequency:
+		dataName = "val_8_F_F_True_9782341"
+	else:
+		dataName = "val_8_S_F_True_9782341"
 else:
-	dataName = "valid_4_f_sr"
+	if inputIsFrequency:
+		dataName = "val_8_F_S_True_9782341"
+	else:
+		dataName = "val_8_S_S_True_9782341"
 path = "data/" + dataName + "/"
 
 inputs = ioext.loadNPData(path + "lowres_*.npy")
@@ -111,13 +118,15 @@ if args.showReference:
 outputFramesLow = []
 if args.showLowFreq or hasReducedOutput: 
 	highRes = np.zeros(freqResOrg)
+	highResReduced = np.zeros(outputFramesFreq[0].shape)
 	lowResSize = np.array(inputs[0].shape)
 	begin = (freqResOrg[0] - lowResSize[0]) // 2
 	end = begin + lowResSize[0]
 
 	totalMSE = 0
 	totalF = 0
-	psTotal = np.copy(psTotalZero)
+	if args.powerSpectrum:
+		psTotal = np.copy(psTotalZero)
 
 	for i in range(len(inputs)):
 		highRes[begin:end,0:lowResSize[1]] = inputs[i]
@@ -126,7 +135,8 @@ if args.showLowFreq or hasReducedOutput:
 
 		if args.computeError:
 			totalMSE += mse(vorticity, outputFramesSpat[i])
-			totalF += complexError(highRes, outputFramesFreq[i])
+			totalF += complexError(highResReduced, outputFramesFreq[i])
+		if args.powerSpectrum:
 			freqs_, ps = frequency.getSpectrum(highRes, powerSpectrumAxis)
 			psTotal += ps
 
@@ -167,14 +177,16 @@ for modelName in args.models:
 	if args.computeError:
 		totalMSE = 0
 		totalF = 0
-		psTotal = np.copy(psTotalZero)
+		if args.powerSpectrum:
+			psTotal = np.copy(psTotalZero)
 		for i in range(len(out)):
 			totalMSE += mse(toSpatial(inputs[i], out[i]), outputFramesSpat[i])
 			outFreq = toFrequency(out[i])
 			totalF += complexError(outFreq, outputFramesFreq[i])
 			
-			freqs_, ps = frequency.getSpectrum(outFreq, powerSpectrumAxis)
-			psTotal += ps
+			if args.powerSpectrum:
+				freqs_, ps = frequency.getSpectrum(outFreq, powerSpectrumAxis)
+				psTotal += ps
 
 		if args.powerSpectrum:
 			plt.semilogy(frequencyComponents, np.abs((psTotal / len(out))) )#psTotalRef -

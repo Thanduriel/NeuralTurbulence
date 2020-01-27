@@ -33,32 +33,33 @@ parser.set_defaults(showGui=False)
 args = parser.parse_args()
 
 steps = args.steps
-simName = "trololo"
-npSeed = args.seed
+simName = "NeuralTurbolance"
+npSeed = 9782341#args.seed #9782341
 resolution = args.resolution
 
 # Scene settings
 # ---------------------------------------------------------------------#
 setDebugLevel(0)
+# in this mode no network is trained
+writeData = False
+dataSetSize = 1024
 
 # NN params
 # ----------------------------------------------------------------------#
-modelName = "highFreqsDeconv"
-windowSize = 4
-lstmSize = resolution * resolution
+modelName = "scale8Cone2"
+windowSize = 8
 batchSize = 4
 
 batchDistance = 1024
-historySize = batchSize * batchDistance
 
-inOutScale = 4
+inOutScale = 8
 
 class Format(Enum):
     SPATIAL = 1
     FREQUENCY = 2
 
 inputFormat = Format.FREQUENCY
-outputFormat = Format.SPATIAL
+outputFormat = Format.FREQUENCY
 # only expect low frequency components
 useReducedOutput = True
 useLagWindows = False
@@ -142,6 +143,7 @@ if args.showGui:
 	gui.show()
 
 def generateData(offset, batchSize):
+	historySize = batchSize * batchDistance
 	slidingWindow = np.zeros((windowSize,)+lowFreqRes)
 	# ringbuffer of previous states to create batches from
 	inputHistory = np.zeros((historySize,)+slidingWindow.shape)
@@ -223,6 +225,11 @@ def generateData(offset, batchSize):
 
 			# create data batches after history is full
 			if t > beginYield:
+
+				if writeData:
+					np.save("{}/lowres_{:04d}".format(dataPath,t), input)
+					np.save("{}/fullres_{:04d}".format(dataPath,t), currentVal)
+
 				currentInputBatch = []
 				currentOutputBatch = []
 				for i in range(batchSize):
@@ -234,17 +241,19 @@ def generateData(offset, batchSize):
 				outputs = np.reshape(currentOutputBatch, (batchSize,)+currentVal.shape)
 				yield (inputs, outputs)
 
-	#	if t > beginYield:
-	#		np.save("data/valid_4_f_sr/lowres_{:04d}".format(t), input)
-	#		np.save("data/valid_4_f_sr/fullres_{:04d}".format(t), currentVal)
-
 		sm.step()
 		t = t + 1
 
-#gen = generateData(1024, batchSize)
-#for i in range(1000):
-#	next(gen)
-#exit()
+if writeData:
+	dataPath = "data/val_{}_{}_{}_{}_{}".format(inOutScale, inputFormat.name[0], outputFormat.name[0], useReducedOutput, npSeed)
+	if not os.path.exists(dataPath):
+		os.makedirs(dataPath)
+		gen = generateData(1024, 1)
+		for i in range(dataSetSize):
+			next(gen)
+	else:
+		print("Folder already exists. No data will be written.")
+	exit()
 
 # model setup
 # ----------------------------------------------------------------------#
@@ -258,37 +267,50 @@ def buildModel(batchSize, windowSize):
 					  batch_size=batchSize)
 #	x = layers.TimeDistributed(layers.Conv2D(32,2,2))(inputs)
 #	x = layers.TimeDistributed(layers.Conv2D(16,2,2))(x)
-	flatInput = layers.Reshape((windowSize,inSize))(inputs)
-	first = layers.LSTM(512, activation='tanh', 
+	flatInput = layers.Reshape((windowSize, inSize))(inputs) #windowSize
+#	first = layers.Dense(512)(flatInput)
+	first = layers.LSTM(64, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
-	x1 = layers.LSTM(256, stateful=True, return_sequences=True)(first)
-#	x1 = layers.Add()([x1,x2])
-	x2 = layers.LSTM(256, stateful=True, return_sequences=True)(x1)
+	x1 = layers.LSTM(64, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([x1,first])
+	x2 = layers.LSTM(64, stateful=True, return_sequences=True)(x1)
 	x1 = layers.Add()([x1,x2])
-	x = layers.LSTM(512, stateful=True, return_sequences=True)(x1)
-#	x = layers.Add()([first,x])
-#	x = layers.LSTM(512, stateful=True)(x)
+	x2 = layers.LSTM(64, stateful=True, return_sequences=True)(x1)
+	x1 = layers.Add()([x1,x2])
+	x2 = layers.LSTM(144, stateful=True, return_sequences=True)(x1)
+	x1 = layers.Add()([flatInput,x2])
+	x1 = layers.LSTM(256, stateful=True, return_sequences=False)(x1)
+	x2 = layers.Dense(256, activation='tanh')(x1)
+#	x2 = layers.BatchNormalization()(x2)
+#	x1 = layers.Add()([x1,x2])
+	x = layers.Dense(512, activation='tanh')(x1)
+#	x = layers.BatchNormalization()(x)
+#	x2 = layers.BatchNormalization()(x2)
+#	x1 = layers.Add()([x1,x2])
+#	x2 = layers.LSTM(128, stateful=True, return_sequences=True)(x1)
+#	x1 = layers.Add()([x1,x2])
+#	x = layers.LSTM(512, stateful=True, return_sequences=False)(x1)
 #	first = layers.Lambda(lambda x : x[:,-1])(first)
-	x = layers.Add()([first,x])
-	x = layers.LSTM(512, stateful=True, return_sequences=False)(x)
-	x = layers.Reshape((1,1,512))(x)
-	x = layers.Conv2DTranspose(64, (2,4), strides=(1,1))(x)
-	x = layers.Conv2DTranspose(32, 2, strides=(2,2), padding='same')(x)
-	x = layers.Conv2DTranspose(16, 4, strides=(2,2), padding='same')(x)
-	x = layers.Conv2DTranspose(8, 8, strides=(2,2), padding='same')(x)
-	x = layers.Conv2DTranspose(4, 16, strides=(2,2), padding='same')(x)
-	output = layers.Conv2DTranspose(1, 16, strides=(2,2), padding='same')(x)
+#	x = layers.Add()([first,x])
+#	x = layers.LSTM(512, stateful=True, return_sequences=False)(x)
+#	x = layers.Reshape((1,1,512))(first)
+#	x = layers.Conv2DTranspose(128, (2,4), strides=(1,1))(x)
+#	x = layers.Conv2DTranspose(64, 2, strides=(2,2), padding='same')(x)
+#	x = layers.Conv2DTranspose(32, 4, strides=(2,2), padding='same')(x)
+#	x = layers.Conv2DTranspose(32, 5, strides=(2,2), padding='same')(x)
+#	x = layers.Conv2DTranspose(16, 5, strides=(2,2), padding='same')(x)
+#	output = layers.Conv2DTranspose(1, 5, strides=(2,2), padding='same')(x)
 #	y = layers.LSTM(inSize, stateful=True)(flatInput)
 #	x = layers.concatenate([x,y])
 #	x = layers.Dense(1024, activation='tanh')(x)
-#	x = layers.Dense(outputSize)(x)
+	x = layers.Dense(outputSize)(x)
 	# extract current time input
 #	forward = layers.Reshape((lowFreqRes))(inputs)
 #	forward = layers.Lambda(lambda x : x[:,-1])(inputs)
 #	forward = tfextensions.UpsampleFreq(lowFreqRes, outputRes)(forward)
 #	forward = layers.UpSampling2D(interpolation='bilinear')(forward)
-#	output = layers.Reshape(outputRes)(x)
+	output = layers.Reshape(outputRes)(x)
 #	output = layers.Add()([forward, output])
 	model = keras.Model(inputs=inputs, outputs=output)
 
@@ -299,7 +321,7 @@ def buildModel(batchSize, windowSize):
 	else:
 		model.compile(loss=keras.losses.mse,
 			optimizer=keras.optimizers.RMSprop(),
-			metrics=[tfextensions.frequencyLoss])
+			metrics=["mse"])
 
 	return model
 
@@ -315,12 +337,13 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
 
 history = model.fit_generator(generateData(1024, batchSize),
 							  steps_per_epoch=512, 
-							  epochs=200,
+							  epochs=128,
 							  callbacks=[cp_callback],
 							  use_multiprocessing=False)
 
 #model.save("highFreqsShortW8B4Learn.h5")
 modelS = buildModel(1,1)
 modelS.set_weights(model.get_weights())
-modelS.save("backup.h5")
-modelS.save("modelName_W{}_B{}.h5".format(windowSize, batchSize))
+fullName = "{}_W{}_B{}.h5".format(modelName, windowSize, batchSize)
+modelS.save(fullName)
+print("Saved model as {}.".format(fullName))
