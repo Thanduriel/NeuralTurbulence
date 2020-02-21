@@ -10,6 +10,9 @@ def stackComplex(a):
 
 # inverse of stackComplex
 def flattenComplex(a):
+	if(a.shape[-1] == 1):
+		a = np.reshape(a, a.shape[:-1])
+
 	re = a[...,0]
 	im = 1j * a[...,1]
 

@@ -58,9 +58,9 @@ else:
 path = "data/" + dataName + "/"
 
 inputs = ioext.loadNPData(path + "lowres_*.npy")
-inputFrames, lowRes = ioext.createTimeSeries(inputs, timeFrame)
-inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
 outputs = ioext.loadNPData(path + "fullres_*.npy")
+inputFrames, outputs, lowRes = ioext.createTimeSeries(inputs, outputs, timeFrame, False)
+inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
 simRes = outputs[0].shape
 if simRes[-1] == 1:
 	simRes = simRes[0:2]
@@ -74,7 +74,7 @@ else:
 	toSpatial = lambda inp,out : out if len(out.shape) == 2 else out[:,:,0]
 	toFrequency = lambda x : frequency.stackComplex(np.fft.fftshift(np.fft.rfftn(x), axes=0))
 
-outputFrames = np.reshape(outputs, (len(outputs), ) + simRes);
+#outputFrames = np.reshape(outputs, (len(outputs), ) + simRes);
 outputFrames = np.reshape(outputs, (len(outputs), simRes[0], simRes[1]));
 
 outputFramesSpat = []

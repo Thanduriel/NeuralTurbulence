@@ -38,21 +38,48 @@ def loadNPData(path):
 		data.append( arr )
 	return data
 
-def createTimeSeries(data, windowSize):
-	steps = len(data)
-	numWindows   = steps - windowSize
+def createTimeSeries(inputs, outputs, windowSize, lagWindows):
+	steps = len(inputs)
+	numWindows   = steps - (windowSize-1)
 	inputFrames = []
+	stepSize = 1 if lagWindows else windowSize
 
-	for i in range(0, numWindows):
+	for i in range(0, numWindows,stepSize):
 		input = []
 		for j in range(0, windowSize):
-			input.append(data[i+j].flatten())
+			input.append(inputs[i+j].flatten())
 		inputFrames.append(input)
 
-	simRes = data[0].shape
+	outputs = outputs[windowSize-1:]
+	if (not lagWindows and windowSize != 1):
+		outputs = outputs[::windowSize]
+
+	simRes = inputs[0].shape
 	inputFrames = np.reshape(inputFrames, (len(inputFrames),windowSize)+simRes)
 
-	return inputFrames, simRes
+	return inputFrames, outputs, simRes
+
+def createBatches(inputs, outputs, batchSize):
+	assert(len(inputs) == len(outputs))
+
+	size = len(inputs) // batchSize
+	inpBatches = []
+	outBatches = []	
+	for i in range(size):
+		inpBatch = []
+		outBatch = []
+		for j in range(batchSize):
+			ind = i + j * size
+			inpBatch.append(inputs[ind])
+			outBatch.append(outputs[ind])
+		inpBatches.append(inpBatch)
+		outBatches.append(outBatch)
+
+	inpBatches = np.reshape(inpBatches, (size, batchSize) + inputs[0].shape)
+	outBatches = np.reshape(outBatches, (size, batchSize) + outputs[0].shape)
+
+	return inpBatches, outBatches
+
 
 def loadTimeseries(densityPath, velocityPath, timeFrame):
 	densities = loadNPData(densityPath)
