@@ -8,3 +8,14 @@ data/
 *.sqlite
 *.json
 *.suo
+*.pyc
+
+*.h5
+timeseries/currentModel/
+
+*.out
+*.log
+*.gz
+*.aux
+*.bbl
+*.blg

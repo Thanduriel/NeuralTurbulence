@@ -1,0 +1,91 @@
+\documentclass[sigconf]{acmart}
+
+\usepackage{booktabs} % For formal tables
+\usepackage{listings}
+
+% Copyright
+\setcopyright{none}
+
+% DOI
+\acmDOI{}
+
+% ISBN
+\acmISBN{}
+
+%Conference
+\acmConference{}{}{}
+
+%\acmBooktitle{}
+%\settopmatter{printacmref=false}
+
+\begin{document}
+
+\title{Simulating Turbulence with Recurrent Neural Networks }
+\subtitle{}
+
+\author{Robert Jendersie}
+
+\maketitle
+
+\section{Introduction}
+\begin{itemize}
+	\item simulation of turbolence expensive
+	\item relationship between different frequencies is only statistically understood \cite{kim2008wavelet}
+	\item recently RNNs are used to predict chaotic physical systems \cite{vlachas2019forecasting}
+\end{itemize}
+%* relationship between different resolutions is only statistical understood 
+%* numeric simulations of high resolutions are expensive
+%* one approach: generate turbulence with plausible energy distributions and temporal coherence
+%\cite{kim2008wavelet}
+%* recently RNNs are used to predict chaotic physical systems
+\section{Training Setup}
+\begin{itemize}
+	\item scene description
+	\item fit\_generator
+\end{itemize}
+\subsection{Parameters}
+\begin{itemize}
+	\item noisy inflow
+	\item inflow velocity
+	\item obstacle size
+	\item viscosity
+\end{itemize}
+%* training requires high quality data
+%* numerical simulation can provide unlimited supply, so little risk of over-fitting
+\subsection{Stateful Recurrent Neural Networks}
+\begin{itemize}
+	\item input window size for unrolled learning
+	\item batches (require continuity)
+	\item implementation tricks for learning -> application
+\end{itemize}
+%* when stateful model is considered continuous stream is required, so no shuffling or reusing of datasets
+%* generator pattern allows for runs of any length
+%* RNN training uses windows of k timesteps
+%* batches can be sampled from a single simulation by maintaining a buffer of the history
+%* input output decomposition
+\section{Network Architecture}
+\begin{itemize}
+	\item possible inputs -> output
+	\item stateful / stateless
+\end{itemize}
+\subsection{Frequency Domain}
+\begin{itemize}
+	\item frequency vs spatial
+	\item conv, deconv, dense
+\end{itemize}
+\subsection{Common Options}
+\begin{itemize}
+	\item LSTM / GRU
+	\item residual connections \cite{he2016deep}
+	\item batch normalization
+\end{itemize}
+\section{Evaluation}
+\section{Conclusion}
+\subsection{Limitations}
+\subsection{Future Work}
+
+\bibliographystyle{ieeetr}
+%\bibliographystyle{ACM-Reference-Format}
+%\nocite{*}
+\bibliography{references}
+\end{document}
