@@ -2,6 +2,13 @@
 
 \usepackage{booktabs} % For formal tables
 \usepackage{listings}
+\usepackage{amsmath} % AMS Math Package
+\usepackage{amsthm} % Theorem Formatting
+\usepackage{amssymb}	% Math symbols such as \mathbb
+\usepackage{tikz}
+\usetikzlibrary {positioning}
+
+\newcommand{\curl}[1]{{\nabla} \times #1} % for curl
 
 % Copyright
 \setcopyright{none}
@@ -28,27 +35,66 @@
 \maketitle
 
 \section{Introduction}
+In fluid dynamics, turbulence remains an unsolved problem. While the dynamics are described by the Navier-Stokes equations, a numerical simulation of sufficiently high resolution, where turbulence operates, remains infeasible. On a statistical level however, the different scales of frequencies are known to follow the Kolmogorov cascade, an observation which has been used to generate turbulence with plausible energy distributions and temporal coherence \cite{kim2008wavelet}. \\
+Neural networks have enjoyed success in an increasingly wide range of problems, including classification, long term decision-making and image synthesis.
+Recently, recurrent neural networks(RNNs) have been considered to predict chaotic physical systems; see \cite{vlachas2019forecasting} for a comparison off different approaches.
+The possibility of having a RNN learn to simulate a turbulent flow is explored in this report.
+\section{Network Architecture}
+\begin{figure}
+\begin{tikzpicture}
+[add/.style={circle,draw},layer/.style={rectangle,draw}]
+\node[layer] (rnn0) {RNN};
+\node[add] (add0) [right=of rnn0] {+};
+\node[layer] (rnn1) [right=of add0] {RNN};
+\node[add] (add1) [right=of rnn1] {+};
+\node[layer] (rnn2) [right=of add1] {RNN};
+\draw [->] (rnn0.east) -- (add0.west);
+\draw [->] (add0.east) -- (rnn1.west);
+\draw [->] (add0) to [bend left=45] (add1);
+\draw [->] (rnn1.east) -- (add1.west);
+\draw [->] (add1.east) -- (rnn2.west);
+\end{tikzpicture}
+\caption{Residual Layers.}
+\label{residualLayers}
+\end{figure}
+The objective of the network is to simulate the high resolution vector-field $\vec{u}$ for an arbitrary number of steps in a scene where turbulence occurs.
+Instead of directly operating on $\vec{u}$, its vorticity $\zeta$
+\[
+\zeta = \curl{\vec{u}},
+\]
+is used. Assuming that $\vec{u}$ is divergence free, $\zeta$ is sufficient to reconstruct the vector-field. In 2D, the vorticity is a scalar-field, thus reducing the number of dimensions and making it easy to visualize.
+\subsection{Inputs and Outputs}
+As input, the full $\zeta$ from the previous time step and the current state of a lower resolution simulation are considered. 
+In addition, parameters describing the variable parts of the scene, such as the size of the obstacle and inflow velocity may be given.
+As output, the high resolution $\zeta$ is expected.
+When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to create the full size output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case multiple dense layers with non-linear activation functions are applied to match the correct sizes.
+\subsection{Recurrent Layers}
+The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. This generally improves the training success, especially for longer networks, at small cost for both training and execution since no extra weights are needed and addition operations are cheap \cite{he2016deep}. \\
+An important parameter of the units is their state-fullness. Usually RNNs are feed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies. Thus, only state-full networks are considered.
+%todo refs
+\subsection{Frequency Domain}
 \begin{itemize}
-	\item simulation of turbolence expensive
-	\item relationship between different frequencies is only statistically understood \cite{kim2008wavelet}
-	\item recently RNNs are used to predict chaotic physical systems \cite{vlachas2019forecasting}
+	\item frequency vs spatial
+	\item conv, deconv, dense
 \end{itemize}
-%* relationship between different resolutions is only statistical understood 
-%* numeric simulations of high resolutions are expensive
-%* one approach: generate turbulence with plausible energy distributions and temporal coherence
-%\cite{kim2008wavelet}
-%* recently RNNs are used to predict chaotic physical systems
+\subsection{Common Options}
+\begin{itemize}
+	\item LSTM / GRU
+	\item residual connections \cite{he2016deep}
+	\item batch normalization
+\end{itemize}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Training Setup}
 \begin{itemize}
 	\item scene description
 	\item fit\_generator
+	\item 
 \end{itemize}
 \subsection{Parameters}
 \begin{itemize}
 	\item noisy inflow
 	\item inflow velocity
 	\item obstacle size
-	\item viscosity
 \end{itemize}
 %* training requires high quality data
 %* numerical simulation can provide unlimited supply, so little risk of over-fitting
@@ -63,22 +109,6 @@
 %* RNN training uses windows of k timesteps
 %* batches can be sampled from a single simulation by maintaining a buffer of the history
 %* input output decomposition
-\section{Network Architecture}
-\begin{itemize}
-	\item possible inputs -> output
-	\item stateful / stateless
-\end{itemize}
-\subsection{Frequency Domain}
-\begin{itemize}
-	\item frequency vs spatial
-	\item conv, deconv, dense
-\end{itemize}
-\subsection{Common Options}
-\begin{itemize}
-	\item LSTM / GRU
-	\item residual connections \cite{he2016deep}
-	\item batch normalization
-\end{itemize}
 \section{Evaluation}
 \section{Conclusion}
 \subsection{Limitations}
