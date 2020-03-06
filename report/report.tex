@@ -8,6 +8,7 @@
 \usepackage{tikz}
 \usepackage{siunitx}
 \usepackage{graphicx}
+\usepackage{minted} % code
 \usetikzlibrary {positioning}
 
 \newcommand{\curl}[1]{{\nabla} \times #1} % for curl
@@ -91,12 +92,9 @@ An important parameter of the units is their state-fullness. Usually RNNs are fe
 	\begin{tikzpicture}
 	\node[anchor=south west,inner sep=0] (image) at (0,0) {\includegraphics[width=0.45\textwidth]{imgs/scene.png}};
 	\begin{scope}[x={(image.south east)},y={(image.north west)}]
-		\draw[blue,ultra thick,rounded corners] (0.0,0.419) rectangle (0.05,0.581);
-		\draw[blue,ultra thick] (0.2,0.5) ellipse [x radius=0.05, y radius=0.1];
+		\draw[blue,ultra thick] (0.0,0.419) rectangle (0.05,0.581) node[above] {source};
+		\draw[blue,ultra thick] (0.2,0.5) ellipse [x radius=0.05, y radius=0.1] (0.2,0.6) node[above] {obstacle};
 	\end{scope}
-	\draw (-0.081*5,0.0) rectangle (0.081*5,0.1*5);
-	\draw (0.0,0.25*5) circle [radius=0.1*5] (0.1*5,0.25*5) node[right] {obstacle};
-	\draw (-0.081*5,0.0) rectangle (0.081*5,0.1*5) (0.081*5,0.05*5) node[right] {source};
 	\end{tikzpicture}
 	\caption{The Scene.}
 	\label{trainingScene}
@@ -106,22 +104,39 @@ The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}
 Advection is computed with a second order semi Lagrange \\
 Instead of a fixed size data set, the generator pattern is used. The numerical simulation can provide a continuous stream of new data, minimizing the risk of over-fitting. Also, usual processing such as shuffling and batching the data after each epoch pose problems with the consistent state of the network over multiple training steps.
 \subsection{Stateful Recurrent Neural Networks}
-As mentioned before, RNN layers use a special training process. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
-%todo figure for this
+As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
+\begin{figure}
+	\begin{tikzpicture}
+	[gap/.style={},layer/.style={rectangle,draw}]
+	\node[gap]   (inp0) {$t_0$};
+	\node[gap]   (inp1) [right=of inp0] {$t_1$};
+	\node[layer] (rnn0) [below=of inp0] {LSTM};
+	\node[layer] (rnn1) [right=of rnn0, below=of inp1] {LSTM};
+	\node[gap]   (rnn2) [right=of rnn1] {$\dots$};
+	\node[layer] (rnn3) [right=of rnn2] {LSTM};
+	\node[gap]   (inp2) [right=of inp1, above=of rnn3] {$t_{k-1}$};
+	\node[gap]   (outp) [below=of rnn3] {$t_k$};
+	\draw [->] (inp0.south) -- (rnn0.north);
+	\draw [->] (inp1.south) -- (rnn1.north);
+	\draw [->] (inp2.south) -- (rnn3.north);
+	\draw [->] (rnn0.east) -- (rnn1.west);
+	\draw [->] (rnn1.east) -- (rnn2.west);
+	\draw [->] (rnn2.east) -- (rnn3.west);
+	\draw [->] (rnn3.south) -- (outp.north);
+	\end{tikzpicture}
+	\caption{A single LSTM layer in training.}
+	\label{rnnTraining}
+\end{figure}
 While a larger window size $k$ may allow the network to pick up long term dependencies, the increased training time sets practical bounds and the impact of different choices is tested.\\
-Processing multiple samples together as a batch and updating weights from the accumulated error is important both to speed up the training and to prevent over-fitting. However, for state-full networks, continuity across batches is required. Thus, batches of size $b$ would need to be build from $b$ different time-series. Instead of running multiple simulations a ring buffer of previous steps is kept. By choosing a sufficient distance $d$, a history of size $b \cdot d$ can be used to create batches of seemingly independent simulations. Let $p$ be the pointer to the current position of the ring buffer. Then after just one simulation step the next batch is taken from the elements with indices
+Processing multiple samples together as a batch and updating weights from the accumulated error is important both to speed up the training and to prevent over-fitting. However, for state-full networks, continuity across batches is required. Thus, batches of size $b$ would need to be build from $b$ different time-series. Instead of running multiple simulations a ring buffer of previous steps is kept. By choosing a sufficient distance $d$, a history of size $b \cdot d$ can be used to create batches of seemingly independent simulations. Let $p$ be the pointer to the current position of the ring buffer. Then after just one simulation step the next batch is constructed from the elements with indices
 \[
-ind = (p + i \cdot d) \mod (b \cdot d).
+ind_i = (p + i \cdot d) \mod (b \cdot d),
 \]
-
-Impractical for the envisioned use case
-\begin{itemize}
-	\item implementation tricks for learning -> application
-\end{itemize}
-%* when stateful model is considered continuous stream is required, so no shuffling or reusing of datasets
-%* generator pattern allows for runs of any length
-%* RNN training uses windows of k timesteps
-%* batches can be sampled from a single simulation by maintaining a buffer of the history
+where $i=0,\dots,b-1$.
+Since tensorflow requires for state-full RNNs that the batch size is a fixed parameter, the trained model is impractical for the actual use case where just one time series should be simulated. Fortunately this issue, as well as the awkwardness of having to input multiple time steps to receive just one output, can be circumvented by building another model with the same architecture but $b=k=1$. Then the training results from \textit{modelT} can be transferred to \textit{modelP} via 
+\begin{minted}{python}
+modelP.set_weights(modelT.get_weights())
+\end{minted}
 \section{Evaluation}
 \section{Conclusion}
 \subsection{Limitations}
