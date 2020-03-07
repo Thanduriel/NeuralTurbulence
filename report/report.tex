@@ -67,10 +67,10 @@ Instead of directly operating on $\vec{u}$, its vorticity $\zeta$
 \]
 is used. Assuming that $\vec{u}$ is divergence free, $\zeta$ is sufficient to reconstruct the vector-field. In 2D, the vorticity is a scalar-field, thus reducing the number of dimensions and making it easy to visualize.
 \subsection{Inputs and Outputs}
-As input, the full $\zeta$ from the previous time step and the current state of a lower resolution simulation are considered. 
+As input, both the full $\zeta$ from the previous time step and the current state of simulation with a by factor $s$ lower resolution are considered. 
 In addition, parameters describing the variable parts of the scene, such as the size of the obstacle and inflow velocity may be given.
 As output, the high resolution $\zeta$ is expected.
-When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to create the full size output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case multiple dense layers with non-linear activation functions are applied to match the correct sizes.
+When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to create the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case multiple dense layers with non-linear activation functions are applied to match the correct sizes. Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels.
 \subsection{Recurrent Layers}
 The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. This generally improves the training success, especially for longer networks, at small cost for both training and execution since no extra weights are needed and addition operations are cheap \cite{he2016deep}. \\
 An important parameter of the units is their state-fullness. Usually RNNs are feed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies. Thus, only state-full networks are considered.
@@ -99,9 +99,31 @@ An important parameter of the units is their state-fullness. Usually RNNs are fe
 	\caption{The Scene.}
 	\label{trainingScene}
 \end{figure}
-The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene} consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity is applied to the input.
+The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity is applied to the input.
 %todo check this
 Advection is computed with a second order semi Lagrange \\
+The low resolution inputs for the purpose of training are extracted from the 2D discrete Fourier Transform 
+\[
+Z = \mathcal{F} (\zeta),
+\]
+which is also depicted in Figure~\ref{lowFreqs}.
+Since $\zeta$ is real, symmetries in $Z$ allow the use of only the upper quadrants. The resulting real part is even $Z(u,v)=Z(-u,-v)$ and the imaginary part odd $Z(u,v)=-Z(-u,-v)$. The input consists of all frequencies up to $s$, the output of all larger frequencies.
+\begin{figure}
+	\begin{tikzpicture}
+	\draw[fill=green!20] (-1.0,0.0) rectangle (1.0,1.0) node[right] {output};
+	\draw[fill=blue!20] (-0.5,0.0) rectangle (0.5,0.5) node[right] {input};
+	\draw (-0.5,-0.5) rectangle (0.5,0.5);
+	\draw (-0.5,-0.5) rectangle (0.5,0.5);
+	\draw[thin, gray] (-1.0,-1.0) rectangle (1.0,1.0);
+	\draw[->] (-1.5,0) -- (1.5,0) node[below] {$u$};
+	\draw[->] (0,-1.5) -- (0,1.5) node[right] {$v$};
+	\draw(-1.0,0.0) node[below left] {$-1$} (1.0,0.0) node[below right] {$1$};
+	\draw(0.0,-1.0) node[below left] {$-1$} (0.0,1.0) node[above left] {$1$};
+	\draw(0.5,0.0) node[below right] {$s$};
+	\end{tikzpicture}
+	\caption{Input and outputs from $Z(u,v)$.}
+	\label{lowFreqs}
+\end{figure}
 Instead of a fixed size data set, the generator pattern is used. The numerical simulation can provide a continuous stream of new data, minimizing the risk of over-fitting. Also, usual processing such as shuffling and batching the data after each epoch pose problems with the consistent state of the network over multiple training steps.
 \subsection{Stateful Recurrent Neural Networks}
 As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
