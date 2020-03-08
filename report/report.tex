@@ -40,28 +40,11 @@
 \section{Introduction}
 In fluid dynamics, turbulence remains an unsolved problem. While the dynamics are described by the Navier-Stokes equations, a numerical simulation of sufficiently high resolution, where turbulence operates, remains infeasible. On a statistical level however, the different scales of frequencies are known to follow the Kolmogorov cascade, an observation which has been used to generate turbulence with plausible energy distributions and temporal coherence \cite{kim2008wavelet}. \\
 Neural networks have enjoyed success in an increasingly wide range of problems, including classification, long term decision-making and image synthesis.
-Recently, recurrent neural networks(RNNs) have been considered to predict chaotic physical systems; see \cite{vlachas2019forecasting} for a comparison off different approaches.
+Recently, recurrent neural networks (RNNs) have been considered to predict chaotic physical systems; see \cite{vlachas2019forecasting} for a comparison off different approaches.
 The possibility of having a RNN learn to simulate a turbulent flow is explored in this report.
 \section{Network Architecture}
-\begin{figure}
-\begin{tikzpicture}
-[add/.style={circle,draw},layer/.style={rectangle,draw}]
-\node[layer] (rnn0) {RNN};
-\node[add] (add0) [right=of rnn0] {+};
-\node[layer] (rnn1) [right=of add0] {RNN};
-\node[add] (add1) [right=of rnn1] {+};
-\node[layer] (rnn2) [right=of add1] {RNN};
-\draw [->] (rnn0.east) -- (add0.west);
-\draw [->] (add0.east) -- (rnn1.west);
-\draw [->] (add0) to [bend left=45] (add1);
-\draw [->] (rnn1.east) -- (add1.west);
-\draw [->] (add1.east) -- (rnn2.west);
-\end{tikzpicture}
-\caption{Residual Layers.}
-\label{residualLayers}
-\end{figure}
 The objective of the network is to simulate the high resolution vector-field $\vec{u}$ for an arbitrary number of steps in a scene where turbulence occurs.
-Instead of directly operating on $\vec{u}$, its vorticity $\zeta$
+Instead of directly operating on $\vec{u}$, the fluid's vorticity $\zeta$
 \[
 \zeta = \curl{\vec{u}},
 \]
@@ -72,20 +55,31 @@ In addition, parameters describing the variable parts of the scene, such as the 
 As output, the high resolution $\zeta$ is expected.
 When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to create the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case multiple dense layers with non-linear activation functions are applied to match the correct sizes. Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels.
 \subsection{Recurrent Layers}
+\begin{figure}
+	\begin{tikzpicture}
+	[align=center,node distance=0.5cm, add/.style={circle,draw},layer/.style={rectangle,draw},placeholder/.style={}]
+	\node[placeholder] (input) {};
+	\node[add] (add2) [right=of input] {+};
+	\node[layer] (rnn0) [right=of add2] {LSTM};
+	\node[add] (add0) [right=of rnn0] {+};
+	\node[layer] (rnn1) [right=of add0] {LSTM};
+	\node[add] (add1) [right=of rnn1] {+};
+	\node[placeholder] (rnn2) [right=of add1] {};
+	\draw [->] (input.east) -- (add2.west);
+	\draw [->] (add2.east) -- (rnn0.west);
+	\draw [->] (add2) to [bend left=45] (add0);
+	\draw [->] (rnn0.east) -- (add0.west);
+	\draw [->] (add0.east) -- (rnn1.west);
+	\draw [->] (add0) to [bend left=45] (add1);
+	\draw [->] (rnn1.east) -- (add1.west);
+	\draw [->] (add1.east) -- (rnn2.west);
+	\end{tikzpicture}
+	\caption{Residual Layers.}
+	\label{residualLayers}
+\end{figure}
 The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. This generally improves the training success, especially for longer networks, at small cost for both training and execution since no extra weights are needed and addition operations are cheap \cite{he2016deep}. \\
-An important parameter of the units is their state-fullness. Usually RNNs are feed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies. Thus, only state-full networks are considered.
+An important parameter of the recurrent layers is their state-fullness. Usually RNNs are fed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies in the data. Thus, only state-full networks are considered.
 %todo refs
-\subsection{Frequency Domain}
-\begin{itemize}
-	\item frequency vs spatial
-	\item conv, deconv, dense
-\end{itemize}
-\subsection{Common Options}
-\begin{itemize}
-	\item LSTM / GRU
-	\item residual connections \cite{he2016deep}
-	\item batch normalization
-\end{itemize}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Training Setup}
 \begin{figure}
@@ -99,15 +93,14 @@ An important parameter of the units is their state-fullness. Usually RNNs are fe
 	\caption{The Scene.}
 	\label{trainingScene}
 \end{figure}
-The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity is applied to the input.
-%todo check this
-Advection is computed with a second order semi Lagrange \\
+The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above when the streams merge. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity is applied to the input.
+Advection is computed with a second order semi Lagrangian scheme.\\
 The low resolution inputs for the purpose of training are extracted from the 2D discrete Fourier Transform 
 \[
 Z = \mathcal{F} (\zeta),
 \]
 which is also depicted in Figure~\ref{lowFreqs}.
-Since $\zeta$ is real, symmetries in $Z$ allow the use of only the upper quadrants. The resulting real part is even $Z(u,v)=Z(-u,-v)$ and the imaginary part odd $Z(u,v)=-Z(-u,-v)$. The input consists of all frequencies up to $s$, the output of all larger frequencies.
+Since $\zeta$ is real, symmetries in $Z$ allow the use of only the upper quadrants. The resulting real part is even $Z(u,v)=Z(-u,-v)$ and the imaginary part odd $Z(u,v)=-Z(-u,-v)$. The input consists of all frequencies up to $s$, the expected output of all larger frequencies.
 \begin{figure}
 	\begin{tikzpicture}
 	\draw[fill=green!20] (-1.0,0.0) rectangle (1.0,1.0) node[right] {output};
@@ -124,12 +117,17 @@ Since $\zeta$ is real, symmetries in $Z$ allow the use of only the upper quadran
 	\caption{Input and outputs from $Z(u,v)$.}
 	\label{lowFreqs}
 \end{figure}
+As optimizer, RMSprop with default arguments \cite{RMSprop} is used. Other options such as stochastic gradient descent and Adam where briefly considered but seem to perform worse. As loss functions the mean square error 
+\begin{equation}
+	\sum_{x}\sum_{y} (\zeta(x,y) - \hat{\zeta}(x,y))^2,
+\end{equation}
+for spatial outputs for frequency are taken.
 Instead of a fixed size data set, the generator pattern is used. The numerical simulation can provide a continuous stream of new data, minimizing the risk of over-fitting. Also, usual processing such as shuffling and batching the data after each epoch pose problems with the consistent state of the network over multiple training steps.
 \subsection{Stateful Recurrent Neural Networks}
 As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
 \begin{figure}
 	\begin{tikzpicture}
-	[gap/.style={},layer/.style={rectangle,draw}]
+	[gap/.style={},layer/.style={rectangle,draw}, error/.style={red}]
 	\node[gap]   (inp0) {$t_0$};
 	\node[gap]   (inp1) [right=of inp0] {$t_1$};
 	\node[layer] (rnn0) [below=of inp0] {LSTM};
@@ -141,10 +139,14 @@ As mentioned before, RNN layers use a special training process displayed in Figu
 	\draw [->] (inp0.south) -- (rnn0.north);
 	\draw [->] (inp1.south) -- (rnn1.north);
 	\draw [->] (inp2.south) -- (rnn3.north);
-	\draw [->] (rnn0.east) -- (rnn1.west);
-	\draw [->] (rnn1.east) -- (rnn2.west);
-	\draw [->] (rnn2.east) -- (rnn3.west);
-	\draw [->] (rnn3.south) -- (outp.north);
+	\draw[transform canvas={yshift=0.5ex},->] (rnn0.east) -- (rnn1.west);
+	\draw[transform canvas={yshift=-0.5ex},error,->](rnn1.west) -- (rnn0.east); 
+	\draw[transform canvas={yshift=0.5ex},->] (rnn1.east) -- (rnn2.west);
+	\draw[transform canvas={yshift=-0.5ex},error,->](rnn2.west) -- (rnn1.east); 
+	\draw[transform canvas={yshift=0.5ex},->] (rnn2.east) -- (rnn3.west);
+	\draw[transform canvas={yshift=-0.5ex},error,->](rnn3.west) -- (rnn2.east); 
+	\draw[transform canvas={xshift=0.5ex},->] (rnn3.south) -- (outp.north);
+	\draw[transform canvas={xshift=-0.5ex},error,->](outp.north) -- node[auto] {error} (rnn3.south); 
 	\end{tikzpicture}
 	\caption{A single LSTM layer in training.}
 	\label{rnnTraining}
@@ -157,12 +159,22 @@ ind_i = (p + i \cdot d) \mod (b \cdot d),
 where $i=0,\dots,b-1$.
 Since tensorflow requires for state-full RNNs that the batch size is a fixed parameter, the trained model is impractical for the actual use case where just one time series should be simulated. Fortunately this issue, as well as the awkwardness of having to input multiple time steps to receive just one output, can be circumvented by building another model with the same architecture but $b=k=1$. Then the training results from \textit{modelT} can be transferred to \textit{modelP} via 
 \begin{minted}{python}
-modelP.set_weights(modelT.get_weights())
+	modelP.set_weights(modelT.get_weights())
 \end{minted}
 \section{Evaluation}
+Quality of the different networks is evaluated with validation sets of size $~1000$ generated from distinct seeds.
+
+* full scale vs low res guiding
+* network size (units, length)
+* residual layers
+* spatial vs frequency output
 \section{Conclusion}
 \subsection{Limitations}
+* preserving sufficient information
+* producing full output resolution too many weights since similarity can not be used
 \subsection{Future Work}
+* convlstm
+* tilebased
 
 \bibliographystyle{ieeetr}
 %\bibliographystyle{ACM-Reference-Format}
