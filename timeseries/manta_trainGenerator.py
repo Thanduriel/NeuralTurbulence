@@ -10,8 +10,8 @@ import math
 import sys
 import time
 import argparse
+import time
 import numpy as np
-from enum import Enum
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -20,6 +20,7 @@ import tfextensions
 sys.path.append("../utils")
 import gridext
 import ioext
+from common import *
 
 # Main params
 # ----------------------------------------------------------------------#
@@ -35,7 +36,7 @@ args = parser.parse_args()
 
 steps = args.steps
 simName = "NeuralTurbolance"
-npSeed = 1282749#args.seed #9782341
+npSeed = 1282749#args.seed #9782341 #1282749
 resolution = args.resolution
 
 # Scene settings
@@ -47,31 +48,22 @@ dataSetSize = 1024
 
 # NN params
 # ----------------------------------------------------------------------#
-modelName = "scale8InflowInp"
-windowSize = 8
-batchSize = 4
+modelName = "preVortCompNoise"
+windowSize = 16
+batchSize = 16
 
 batchDistance = 1024
 
 inOutScale = 8
 
-class Format(Enum):
-	SPATIAL = 1
-	FREQUENCY = 2
-
-class Inputs(Enum):
-	VORTICITY = 1
-	INFLOW = 2
-
-	def asOut(self):
-		return "OUT_" + self.name
-
-inputFormat = Format.FREQUENCY
-outputFormat = Format.FREQUENCY
+inputFormat = Format.SPATIAL
+outputFormat = Format.SPATIAL
 # only expect low frequency components
 useReducedOutput = True
 useLagWindows = False
-useInflowInput = True
+useInflowInput = False
+useFullResInflow = False
+usePreviousStep = False
 
 # Solver params
 # ----------------------------------------------------------------------#
@@ -80,6 +72,8 @@ dim = 2
 offset = 20
 interval = 1
 useMovingObstacle = False
+useScalingObstacle = False
+varyScalingSteps = 2347
 useVaryingInflow = False
 useVaryingNoise = True
 varyNoiseSteps = 2048
@@ -96,8 +90,10 @@ elif inputFormat == Format.SPATIAL:
 
 if outputFormat == Format.FREQUENCY:
 	outputRes = (res*(res+1) - resIn*(resIn+1), 2, 1)
+	outputResFull = (res*(res+1), 2, 1)
 elif outputFormat == Format.SPATIAL:
 	outputRes = simRes
+	outputResFull = simRes
 	
 gs = vec3(res,res, 1 if dim == 2 else res)
 buoy = vec3(0,-1e-3,0)
@@ -122,10 +118,9 @@ velReconstructed = sm.create(MACGrid)
 bWidth = 1
 flags.initDomain(boundaryWidth=bWidth)
 
-#obsPos = gs*vec3(0.5,0.4,0.5)
-#obsVel.setBound(value=Vec3(0.), boundaryWidth=bWidth+1) # make sure walls are static
-#obs = "dummy"; phiObs = "dummy2"
-obstacle = sm.create(Sphere, center=gs*vec3(0.5,0.4,0.5), radius=res*0.10)
+obsPos = gs*vec3(0.5,0.4,0.5)
+obsRad = res*0.1
+obstacle = sm.create(Sphere, center=obsPos, radius=obsRad)
 phiObs = obstacle.computeLevelset()
 setObstacleFlags(flags=flags, phiObs=phiObs)
 
@@ -169,18 +164,23 @@ def generateData(offset, batchSize):
 	noise = makeNoiseField()
 
 	historySize = batchSize * batchDistance
-	slidingWindow = { Inputs.VORTICITY : np.zeros((windowSize,)+lowFreqRes)}
+	slidingWindow = { VORTICITY : np.zeros((windowSize,)+lowFreqRes)}
 	# ringbuffer of previous states to create batches from
-	inputHistory = { Inputs.VORTICITY : np.zeros((historySize,)+slidingWindow[Inputs.VORTICITY].shape) }
-	outputHistory = { Inputs.VORTICITY : np.zeros((historySize,)+outputRes)}
+	inputHistory = { VORTICITY : np.zeros((historySize,)+slidingWindow[Inputs.VORTICITY].shape) }
+	outputHistory = { VORTICITY : np.zeros((historySize,)+outputRes)}
 	if(useInflowInput):
-		slidingWindow[INFLOW] = np.zeros((windowSize,)+sourceSize)
+		slidingWindow[INFLOW] = np.zeros((windowSize,)+(sourceSize if not useFullResInflow else outputResFull))
 		inputHistory[INFLOW]  = np.zeros((historySize,)+slidingWindow[INFLOW].shape)
-	lowPass = np.array(lowFreqRes)[0:2]
+	if(usePreviousStep):
+		slidingWindow[PREVVORT] = np.zeros((windowSize,)+outputResFull)
+		inputHistory[PREVVORT]  = np.zeros((historySize,)+slidingWindow[PREVVORT].shape)
+		previousStep = np.zeros(outputResFull)
+	lowPass = np.array((resIn,resIn+1))
 	historyPtr = 0
 	velInflow = vec3(np.random.uniform(-0.02,0.02), 0, 0)
 
 	t = 0
+	start = time.time()
 	beginYield = offset + historySize * (1 if useLagWindows else windowSize)
 	# main loop
 	# --------------------------------------------------------------------#
@@ -193,20 +193,22 @@ def generateData(offset, batchSize):
 
 		if useInflowInput:
 			preDensity = gridext.toNumpyArray(density,simResRed)
-			np.save("preDensity", preDensity)
 		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 		if useVaryingInflow:
-			if t % 867:
+			if t % 867 == 0:
 				velInflow = vec3(np.random.uniform(-0.01,0.01), 0, 0)
 			source.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
-	#	resetOutflow( flags=flags, real=density )
-
-	#	vorticityConfinement(vel=vel, flags=flags, strength=0.05)
 		setWallBcs(flags=flags, vel=vel)
 		addBuoyancy(density=density, vel=vel, gravity=buoy , flags=flags)
-	#	if (t < offset): 
-	#		vorticityConfinement(vel=vel, flags=flags, strength=0.05)
+
+		if useScalingObstacle and t % varyScalingSteps == 0:
+			obstacle = sm.create(Sphere, center=obsPos, radius=obsRad*np.random.uniform(0.95,1.05))
+			phiObs = obstacle.computeLevelset()
+			setObstacleFlags(flags=flags, phiObs=phiObs)
+			flags.fillGrid()
+			obs.applyToGrid(grid=density, value=0.)
+
 		solvePressure(flags=flags, vel=vel, pressure=pressure ,  cgMaxIterFac=10.0, cgAccuracy=0.0001)
 
 		getCurl(vel=vel, vort=vorticity , comp=2)
@@ -225,8 +227,16 @@ def generateData(offset, batchSize):
 
 		currentVal = gridext.toNumpyArray(vorticity,simResRed)
 		currentVal = currentVal[:,::-1]
-		
 		freqs, lowFreqs = frequency.decomposeReal(currentVal, lowPass)
+
+		if usePreviousStep:
+			moveWindow(slidingWindow[PREVVORT], np.reshape(previousStep, outputResFull))
+			if outputFormat == Format.SPATIAL:
+				previousStep = currentVal
+			else:
+				previousStep = freqs
+				
+
 		if inputFormat == Format.SPATIAL:
 			input = frequency.invTransformReal(lowFreqs)
 		else:
@@ -238,8 +248,8 @@ def generateData(offset, batchSize):
 			if outputFormat == Format.SPATIAL:
 				currentVal = frequency.invTransformReal(frequency.composeReal(currentVal, np.zeros(lowFreqs.shape), freqs.shape))
 		else:
-			if outputFormat == Format.SPATIAL:
-				currentVal = frequency.invTransformReal(currentVal)
+			if outputFormat == Format.FREQUENCY:
+				currentVal = freqs
 		currentVal = np.reshape(currentVal, outputRes)
 
 		# update sliding windows
@@ -247,7 +257,7 @@ def generateData(offset, batchSize):
 		if useInflowInput:
 			postDensity = gridext.toNumpyArray(density,simResRed)
 			dif = postDensity - preDensity
-			inflow = dif[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1]]
+			inflow = dif[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1]] if not useFullResInflow else np.reshape(dif[:,::-1], outputResFull)
 			moveWindow(slidingWindow[INFLOW], inflow)
 		
 		# record history
@@ -261,35 +271,41 @@ def generateData(offset, batchSize):
 			# create data batches after history is full
 			if t > beginYield:
 
-				if writeData and t > 409600 and t < 410600:
-					np.save("{}/lowres_{:04d}".format(dataPath,t-409600), input)
-					np.save("{}/fullres_{:04d}".format(dataPath,t-409600), currentVal)
+				if writeData:
+					for key,value in slidingWindow.items():
+						np.save("{}/{}_{:04d}".format(dataPath,key.name,t), value[-1])
+					np.save("{}/{}_{:04d}".format(dataPath,VORTICITY.asOut(), t), currentVal)
 
 				# create input/output batches from history
 				inputs = {}
 				for key in inputHistory:
-					currentBatch = []
+					currentBatch = np.zeros((batchSize,)+inputHistory[key][0].shape)
 					for i in range(batchSize):
 						index = (historyPtr + i * batchDistance) % historySize
-						currentBatch.append(np.copy(inputHistory[key][index]))
-					inputs[key.name] = np.reshape(currentBatch, (batchSize,)+inputHistory[key][0].shape)
+						currentBatch[i] = inputHistory[key][index]
+					inputs[key.name] = currentBatch
 				outputs = {}
 				for key in outputHistory:
-					currentBatch = []
+					currentBatch = np.zeros((batchSize,)+outputHistory[key][0].shape)
 					for i in range(batchSize):
 						index = (historyPtr + i * batchDistance) % historySize
-						currentBatch.append(np.copy(outputHistory[key][index]))
-					outputs[key.asOut()] = np.reshape(currentBatch, (batchSize,)+outputHistory[key][0].shape)
-				yield (inputs, outputs)
+						currentBatch[i] = outputHistory[key][index]
+					outputs[key.asOut()] = currentBatch
+				yield (inputs, outputs, [None])
+			elif t % 1000 == 0: # progress bar for warmup
+				print(t / beginYield * 100)
 
 		if useVaryingNoise and t % varyNoiseSteps == 0:
 			noise.posOffset = vec3(np.random.random()*128,np.random.random()*128,np.random.random()*128)
 
 		sm.step()
 		t = t + 1
-
+#		if t % 1000 == 0:
+#			end = time.time()
+#			print(end - start)
+#			start = time.time()
 if writeData:
-	dataPath = "data/long_{}_{}_{}_{}_{}".format(inOutScale, inputFormat.name[0], outputFormat.name[0], useReducedOutput, npSeed)
+	dataPath = "data/fullout_{}_{}_{}_{}_{}".format(inOutScale, inputFormat.name[0], outputFormat.name[0], useReducedOutput, npSeed)
 	if not os.path.exists(dataPath):
 		os.makedirs(dataPath)
 		gen = generateData(1024, 1)
@@ -309,93 +325,120 @@ def buildModel(batchSize, windowSize):
 
 	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
 					  batch_size=batchSize, name=VORTICITY.name)
-	inflowInput    = keras.Input(shape=(windowSize,)+sourceSize,
-					  batch_size=batchSize, name=INFLOW.name)
-#	x = layers.TimeDistributed(layers.Conv2D(32,2,2))(inputs)
-#	x = layers.TimeDistributed(layers.Conv2D(16,2,2))(x)
-	flatInputVort = layers.Reshape((windowSize, inSize))(vorticityInput)
-	flatInputInFlow = layers.Reshape((windowSize, sourceSize[0]*sourceSize[1]))(inflowInput)
-	flatInput = layers.Concatenate(axis=2)([flatInputVort, flatInputInFlow])
-#	first = layers.Dense(512)(flatInput)
-	first = layers.LSTM(144, activation='tanh', 
+	flatVortInput = layers.TimeDistributed(layers.Conv2D(32, (8,16), strides=1, padding='valid'))(vorticityInput)
+	flatInput = layers.Reshape((windowSize, 32))(flatVortInput)
+	first = layers.LSTM(80, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
-#	x1 = layers.Add()([first,flatInput])
-	x2 = layers.LSTM(144, stateful=True, return_sequences=True)(first)
+	x2 = layers.LSTM(80, stateful=True, return_sequences=True)(first)
 	x1 = layers.Add()([first,x2])
-#	x2 = layers.LSTM(64, stateful=True, return_sequences=True)(x1)
-#	x1 = layers.Add()([x1,x2])
-#	x2 = layers.LSTM(144, stateful=True, return_sequences=True)(x1)
-#	x1 = layers.Add()([x1,x2])
-	x1 = layers.LSTM(256, stateful=True, return_sequences=False)(x1)
-	x2 = layers.Dense(256, activation='tanh')(x1)
-#	x2 = layers.BatchNormalization()(x2)
-	x1 = layers.Add()([x1,x2])
-	x = layers.Dense(512, activation='tanh')(x1)
-#	x = layers.Dense(1024, activation='tanh')(x)
-#	x = layers.BatchNormalization()(x)
-#	x2 = layers.BatchNormalization()(x2)
-#	x1 = layers.Add()([x1,x2])
-#	x2 = layers.LSTM(128, stateful=True, return_sequences=True)(x1)
-#	x1 = layers.Add()([x1,x2])
-#	x = layers.LSTM(512, stateful=True, return_sequences=False)(x1)
-#	first = layers.Lambda(lambda x : x[:,-1])(first)
-#	x = layers.Add()([first,x])
-#	x = layers.LSTM(512, stateful=True, return_sequences=False)(x)
-#	x = layers.Reshape((1,1,512))(first)
-#	x = layers.Conv2DTranspose(128, (2,4), strides=(1,1))(x)
-#	x = layers.Conv2DTranspose(64, 2, strides=(2,2), padding='same')(x)
-#	x = layers.Conv2DTranspose(32, 4, strides=(2,2), padding='same')(x)
-#	x = layers.Conv2DTranspose(32, 5, strides=(2,2), padding='same')(x)
-#	x = layers.Conv2DTranspose(16, 5, strides=(2,2), padding='same')(x)
-#	output = layers.Conv2DTranspose(1, 5, strides=(2,2), padding='same')(x)
-#	y = layers.LSTM(inSize, stateful=True)(flatInput)
-#	x = layers.concatenate([x,y])
-#	x = layers.Dense(1024, activation='tanh')(x)
-	x = layers.Dense(outputSize)(x)
-	# extract current time input
-#	forward = layers.Reshape((lowFreqRes))(inputs)
-#	forward = layers.Lambda(lambda x : x[:,-1])(inputs)
-#	forward = tfextensions.UpsampleFreq(lowFreqRes, outputRes)(forward)
-#	forward = layers.UpSampling2D(interpolation='bilinear')(forward)
+	x1 = layers.LSTM(80, stateful=True, return_sequences=False)(x1)
+	x = layers.Reshape((1,1,80))(x1)
+	x = layers.Conv2DTranspose(16, (8,16), strides=(1,1))(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2D(32, 5, strides=(1,1), padding='same', activation='tanh')(x)
+	x = layers.Conv2D(16, 5, strides=(1,1), padding='same', activation='tanh')(x)
+	x = layers.Conv2D(8, 5, strides=(1,1), padding='same', activation='tanh')(x)
+	x = layers.Conv2D(1, 3, strides=(1,1), padding='same', activation='tanh')(x)
 	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
-#	output = layers.Add()([forward, output])
-	model = keras.Model(inputs=[vorticityInput, inflowInput], outputs=output)
+	model = keras.Model(inputs=[vorticityInput], outputs=output)
 
 	if outputFormat == Format.SPATIAL:
 		model.compile(loss=keras.losses.mse,
-			optimizer=keras.optimizers.RMSprop(),
-			metrics=[tfextensions.frequencyLoss])
+			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
 	else:
 		model.compile(loss=keras.losses.mse,
 			optimizer=keras.optimizers.RMSprop())
 
 	return model
 
-model = buildModel(batchSize,windowSize)
+def buildModel2(batchSize, windowSize):
+	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
+					  batch_size=batchSize, name=VORTICITY.name)
+	flatVortInput = layers.TimeDistributed(layers.Conv2D(32, (8,16), strides=1, padding='valid'))(vorticityInput)
+	flatInput = layers.Reshape((windowSize, 32))(flatVortInput)
+	first = layers.LSTM(80, activation='tanh', 
+				stateful=True,
+				return_sequences=True)(flatInput)
+	x2 = layers.LSTM(80, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([first,x2])
+	x1 = layers.LSTM(80, stateful=True, return_sequences=False)(x1)
+	x = layers.Reshape((1,1,80))(x1)
+	x = layers.Conv2DTranspose(16, (8,16), strides=(1,1))(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2D(1, 3, strides=(1,1), padding='same', activation='tanh')(x)
+	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
+	model = keras.Model(inputs=[vorticityInput], outputs=output)
+
+	if outputFormat == Format.SPATIAL:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
+	else:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop())
+
+	return model
+
+def buildModel3(batchSize, windowSize):
+	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
+					  batch_size=batchSize, name=VORTICITY.name)
+	flatVortInput = layers.TimeDistributed(layers.Conv2D(64, (8,16), strides=1, padding='valid'))(vorticityInput)
+	flatInput = layers.Reshape((windowSize, 64))(flatVortInput)
+	first = layers.LSTM(80, activation='tanh', 
+				stateful=True,
+				return_sequences=True)(flatInput)
+	x2 = layers.LSTM(80, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([first,x2])
+	x1 = layers.LSTM(80, stateful=True, return_sequences=False)(x1)
+	x = layers.Reshape((1,1,80))(x1)
+	x = layers.Conv2DTranspose(16, (8,16), strides=(1,1))(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2DTranspose(16, 3, strides=(2,2), padding='same')(x)
+	x = layers.Conv2D(32, 5, strides=(1,1), padding='same', activation='tanh')(x)
+	x = layers.Conv2D(16, 5, strides=(1,1), padding='same', activation='tanh')(x)
+	x = layers.Conv2D(8, 5, strides=(1,1), padding='same', activation='tanh')(x)
+	x = layers.Conv2D(1, 3, strides=(1,1), padding='same', activation='tanh')(x)
+	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
+	model = keras.Model(inputs=[vorticityInput], outputs=output)
+
+	if outputFormat == Format.SPATIAL:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
+	else:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop())
+
+	return model
+
+
+models = [buildModel(batchSize,windowSize),buildModel2(batchSize,windowSize), buildModel3(batchSize,windowSize)]#, buildModel3(batchSize,windowSize)]
+validModels = [buildModel(1,1), buildModel2(1,1), buildModel3(1,1)]#, buildModel3(1,1)]
+models[0].summary()
 #model = tf.keras.models.load_model("learning.h5", tfextensions.functionMap)
 
 # model training
 # ----------------------------------------------------------------------#
+fullName = "{}_W{}_B{}".format(modelName, windowSize, batchSize)
 
 # validation data set
 if outputFormat == Format.FREQUENCY:
 	if inputFormat == Format.FREQUENCY:
-		dataName = "val_8_F_F_True_9782341"
+		dataName = "foo_8_F_F_True_9782341"
 	else:
 		dataName = "val_8_S_F_True_9782341"
 else:
 	if inputFormat == Format.FREQUENCY:
-		dataName = "val_8_F_S_True_9782341"
+		dataName = "fullout_8_F_S_False_1282749"
 	else:
-		dataName = "val_8_S_S_True_9782341"
+		dataName = "fullout_8_S_S_True_1282749"
 path = "data/" + dataName + "/"
 
-inputs = ioext.loadNPData(path + "lowres_*.npy")
-outputs = ioext.loadNPData(path + "fullres_*.npy")
-inputFrames, outputs, _ = ioext.createTimeSeries(inputs, outputs, 1, useLagWindows)
-inputFrames = np.reshape(inputFrames, (len(inputFrames), 1)+lowFreqRes)
-outputs = np.reshape(outputs, (len(outputs), )+outputRes)
+inputs, outputs, _ = loadDataSet(path, 1, useLagWindows);
 #if batchSize > 1:
 #	inputFrames, outputs = ioext.createBatches(inputFrames, outputs, batchSize)
 
@@ -411,7 +454,12 @@ class ValidationCallback(tf.keras.callbacks.Callback):
 
 		self.testModel = testModel
 		self.inputs = inputs
-		self.outputs = outputs
+		self.outputs = outputs[VORTICITY.asOut()]
+		if(outputFormat == Format.SPATIAL):
+			outputs = []
+			for i in range(len(self.outputs)):
+				outputs.append(frequency.stackComplex(np.fft.fftshift(np.fft.rfftn(self.outputs[i]), axes=0)))
+			self.outputs = np.reshape(outputs, (len(outputs),)+outputs[0].shape)
 		self.frequency = runFrequency
 		self.history = []
 
@@ -422,9 +470,13 @@ class ValidationCallback(tf.keras.callbacks.Callback):
 		self.testModel.reset_states()
 	#	self.model.reset_states()
 		outputs = self.testModel.predict(self.inputs)
+		if(outputFormat == Format.SPATIAL):
+			outp = []
+			for i in range(len(outputs)):
+				outp.append(frequency.stackComplex(np.fft.fftshift(np.fft.rfftn(outputs[i]), axes=0)))
 		sum = 0
 		for i in range(len(outputs)):
-			dif = np.subtract(frequency.flattenComplex(outputs[i]), frequency.flattenComplex(self.outputs[i]))
+			dif = np.subtract(frequency.flattenComplex(outp[i]), frequency.flattenComplex(self.outputs[i]))
 			sum += np.mean(np.abs(dif))
 
 		print("Validation error: {}".format(sum / len(outputs)))
@@ -432,27 +484,27 @@ class ValidationCallback(tf.keras.callbacks.Callback):
 
 	def on_train_end(self, logs=None):
 		arr = np.reshape(self.history, (len(self.history),))
-		np.save("validLog5",arr)
+		np.save(fullName,arr)
 
 
 print("Starting training.")
 cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt",
                                                  save_weights_only=True,
                                                  verbose=1)
-validation_callback = ValidationCallback(inputFrames, outputs, buildModel(1,1), 1)
 
-history = model.fit_generator(generateData(1024, batchSize),
+generator = generateData(1024, batchSize)
+for i in range(len(models)):
+	validation_callback = ValidationCallback(inputs, outputs, validModels[i], 1)
+	history = models[i].fit(x = generator,
 							  steps_per_epoch=512, 
-							  epochs=128,
-							#  validation_freq=1,
-							#  validation_data=generateValid(inputFrames, outputs),
-							#  validation_steps=len(outputs),
-							  callbacks=[cp_callback, validation_callback],
+							  epochs=60,
+							  callbacks=[validation_callback], # validation_callback
 							  use_multiprocessing=False)
 
-model.save("learningTest.h5")
-modelS = buildModel(1,1)
-modelS.set_weights(model.get_weights())
-fullName = "{}_W{}_B{}.h5".format(modelName, windowSize, batchSize)
-modelS.save(fullName)
-print("Saved model as {}.".format(fullName))
+#model.save("learningTest.h5")
+	modelS = validModels[i]
+	fullName = "{}_".format(fullName, i)
+	modelS.set_weights(models[i].get_weights())
+	saveName = fullName + ".h5"
+	modelS.save(saveName)
+	print("Saved model as {}.".format(saveName))

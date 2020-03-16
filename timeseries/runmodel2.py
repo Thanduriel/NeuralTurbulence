@@ -10,7 +10,23 @@ import matplotlib.pyplot as plt
 sys.path.append("../utils")
 import ioext
 import tfextensions
+from common import *
 from saveimg import arrayToImgFile
+
+def applyLoop(model, inputs):
+	s = inputs[Inputs.PREVVORT.name][0].shape
+	l = len(inputs[Inputs.PREVVORT.name])
+	inp = {}
+	outputs = np.zeros((l,)+s)
+	outputs[0] = inputs[Inputs.PREVVORT.name][0]
+	for i in range(1,l):
+		for key, value in inputs.items():
+			if key != Inputs.PREVVORT.name:
+				inp[key] = np.reshape(value[i], (1,) + value[i].shape)
+		inp[Inputs.PREVVORT.name] = np.reshape(outputs[i-1], (1,) + outputs[i].shape)
+		outputs[i] = model.predict(inp)
+
+	return outputs
 
 parser = argparse.ArgumentParser(description="Runs a saved model and creates a video from its output.")
 parser.add_argument('--input', default='data/vorticitySymReg2/')
@@ -35,9 +51,10 @@ args.computeError = args.computeError or args.powerSpectrum
 # load model now to read the size config
 print("Loading model.")
 model = tf.keras.models.load_model(args.models[0], tfextensions.functionMap)
-timeFrame = model.input_shape[1]
-inputIsFrequency = model.input_shape[-1] == 2 or model.input_shape[-2] == 2
-outputIsFrequency = model.output_shape[-1] == 2 or model.output_shape[-2] == 2
+vorticityInputs = model.inputs[0].shape
+timeFrame = vorticityInputs[1]
+inputIsFrequency = vorticityInputs[-1] == 2 or vorticityInputs[-2] == 2
+outputIsFrequency = model.outputs[0].shape[-1] == 2 or model.outputs[0].shape[-2] == 2
 print("Detected frequency input: {}".format(inputIsFrequency))
 print("Detected frequency output: {}".format(outputIsFrequency))
 # currently no automatic identification possible
@@ -47,25 +64,22 @@ powerSpectrumAxis = 0
 print("Loading data.")
 if outputIsFrequency:
 	if inputIsFrequency:
-		dataName = "val_8_F_F_True_9782341"
+		dataName = "foo_8_F_F_True_9782341"
 	else:
 		dataName = "val_8_S_F_True_9782341"
 else:
 	if inputIsFrequency:
-		dataName = "val_8_F_S_True_9782341"
+		dataName = "foo_8_F_S_True_9782341"
 	else:
-		dataName = "val_8_S_S_True_9782341"
+		dataName = "fullout_8_S_S_True_1282749"
 path = "data/" + dataName + "/"
 
-inputs = ioext.loadNPData(path + "lowres_*.npy")
-outputs = ioext.loadNPData(path + "fullres_*.npy")
-inputFrames, outputs, lowRes = ioext.createTimeSeries(inputs, outputs, timeFrame, False)
-inputFrames = inputFrames[args.begin:]#inputFrames[args.begin:,0,:,:,:]
-simRes = outputs[0].shape
+inputFrames, outputs, inputs = loadDataSet(path, timeFrame, False)
+outputFrames = outputs[Inputs.VORTICITY.asOut()]
+simRes = outputFrames[0].shape
 if simRes[-1] == 1:
 	simRes = simRes[0:2]
 freqResOrg = (64,65,2)
-outputs = outputs[args.begin:]
 
 if outputIsFrequency:
 	toSpatial = lambda inp,out : frequency.invTransformReal(frequency.composeReal(out, inp, freqResOrg))
@@ -74,8 +88,9 @@ else:
 	toSpatial = lambda inp,out : out if len(out.shape) == 2 else out[:,:,0]
 	toFrequency = lambda x : frequency.stackComplex(np.fft.fftshift(np.fft.rfftn(x), axes=0))
 
-#outputFrames = np.reshape(outputs, (len(outputs), ) + simRes);
-outputFrames = np.reshape(outputs, (len(outputs), simRes[0], simRes[1]));
+if outputFrames.shape[-1] == 1:
+	outputFrames = np.reshape(outputFrames, outputFrames.shape[0:-1])
+#outputFrames = np.reshape(outputs, (len(outputs), simRes[0], simRes[1]));
 
 outputFramesSpat = []
 outputFramesFreq = []
@@ -160,7 +175,10 @@ for modelName in args.models:
 	if args.predict or args.computeError:
 		print("Running model {}.".format(modelName))
 		start = time.time()
-		out = model.predict(inputFrames)
+		if Inputs.PREVVORT.name in model.inputs[0].name:
+			out = applyLoop(model, inputFrames)
+		else:
+			out = model.predict(inputFrames)
 		timeUsed = time.time() - start
 		excTimes.append(timeUsed / len(out))
 		out = np.reshape(out, (len(out),) + simRes)
@@ -182,6 +200,9 @@ for modelName in args.models:
 		for i in range(len(out)):
 			totalMSE += mse(toSpatial(inputs[i], out[i]), outputFramesSpat[i])
 			outFreq = toFrequency(out[i])
+			if i  < 80:
+				print(mse(toSpatial(inputs[i], out[i]), outputFramesSpat[i]))
+				#print(complexError(outFreq, outputFramesFreq[i]))
 			totalF += complexError(outFreq, outputFramesFreq[i])
 			
 			if args.powerSpectrum:

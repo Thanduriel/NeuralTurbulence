@@ -29,7 +29,7 @@ def loadNPData(path):
 	files = []
 	for entry in glob.glob(path, recursive=True):
 		files.append(entry)
-	# order is arbitary
+	# load order is arbitary
 	files.sort()
 
 	data = []
@@ -38,9 +38,33 @@ def loadNPData(path):
 		data.append( arr )
 	return data
 
+def createInputSeries(inputs, windowSize, lagWindows):
+	steps       = len(inputs)
+	numWindows  = steps - (windowSize-1)
+	inputFrames = []
+	stepSize    = 1 if lagWindows else windowSize
+
+	for i in range(0, numWindows,stepSize):
+		input = []
+		for j in range(0, windowSize):
+			input.append(inputs[i+j].flatten())
+		inputFrames.append(input)
+
+	simRes = inputs[0].shape
+	inputFrames = np.reshape(inputFrames, (len(inputFrames),windowSize)+simRes)
+
+	return inputFrames
+
+def createOutputSeries(outputs, windowSize, lagWindows):
+	outputs = outputs[windowSize-1:]
+	if (not lagWindows and windowSize != 1):
+		outputs = outputs[::windowSize]
+
+	return np.reshape(outputs, (len(outputs),) + outputs[0].shape)
+
 def createTimeSeries(inputs, outputs, windowSize, lagWindows):
-	steps = len(inputs)
-	numWindows   = steps - (windowSize-1)
+	steps       = len(inputs)
+	numWindows  = steps - (windowSize-1)
 	inputFrames = []
 	stepSize = 1 if lagWindows else windowSize
 
