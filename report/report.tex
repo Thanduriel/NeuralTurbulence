@@ -9,7 +9,9 @@
 \usepackage{siunitx}
 \usepackage{graphicx}
 \usepackage{minted} % code
+\usepackage{pgfplots}
 \usetikzlibrary {positioning}
+\usetikzlibrary {datavisualization}
 
 \newcommand{\curl}[1]{{\nabla} \times #1} % for curl
 
@@ -50,7 +52,7 @@ Instead of directly operating on $\vec{u}$, the fluid's vorticity $\zeta$
 \]
 is used. Assuming that $\vec{u}$ is divergence free, $\zeta$ is sufficient to reconstruct the vector-field. In 2D, the vorticity is a scalar-field, thus reducing the number of dimensions and making it easy to visualize.
 \subsection{Inputs and Outputs}
-As input, both the full $\zeta$ from the previous time step and the current state of simulation with a by factor $s$ lower resolution are considered. 
+As input, both the full $\zeta$ from the previous time step and the current state of simulation with lower resolution by factor $s$ are considered. 
 In addition, parameters describing the variable parts of the scene, such as the size of the obstacle and inflow velocity may be given.
 As output, the high resolution $\zeta$ is expected.
 When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to create the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case multiple dense layers with non-linear activation functions are applied to match the correct sizes. Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels.
@@ -77,8 +79,9 @@ When operating on the spatial data, a stack of convolutional layers is used to e
 	\caption{Residual Layers.}
 	\label{residualLayers}
 \end{figure}
-The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. This generally improves the training success, especially for longer networks, at small cost for both training and execution since no extra weights are needed and addition operations are cheap \cite{he2016deep}. \\
-An important parameter of the recurrent layers is their state-fullness. Usually RNNs are fed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies in the data. Thus, only state-full networks are considered.
+The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. The idea is that the layer then does not need to learn to reproduce most of its inputs and can instead focus only on modifications. This generally improves the training success, especially for longer networks, at low costs for both training and execution since no extra weights are needed and tensor addition operations are cheap \cite{he2016deep}. \\
+%todo read paper again to verify reasoning
+An important parameter of the recurrent layers is their state-fullness. Usually RNNs are fed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies in the data. Thus, only state-full networks are considered here.
 %todo refs
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Training Setup}
@@ -93,7 +96,7 @@ An important parameter of the recurrent layers is their state-fullness. Usually 
 	\caption{The Scene.}
 	\label{trainingScene}
 \end{figure}
-The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above when the streams merge. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity is applied to the input.
+The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above when the streams merge. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity may be applied to the input.
 Advection is computed with a second order semi Lagrangian scheme.\\
 The low resolution inputs for the purpose of training are extracted from the 2D discrete Fourier Transform 
 \[
@@ -121,10 +124,13 @@ As optimizer, RMSprop with default arguments \cite{RMSprop} is used. Other optio
 \begin{equation}
 	\sum_{x}\sum_{y} (\zeta(x,y) - \hat{\zeta}(x,y))^2,
 \end{equation}
-for spatial outputs for frequency are taken.
+for spatial outputs and
+\begin{equation}
+\sum_{u}\sum_{v} |Z(u,v) - \hat{Z}(u,v)|^2,
+\end{equation} for frequency outputs are taken.
 Instead of a fixed size data set, the generator pattern is used. The numerical simulation can provide a continuous stream of new data, minimizing the risk of over-fitting. Also, usual processing such as shuffling and batching the data after each epoch pose problems with the consistent state of the network over multiple training steps.
 \subsection{Stateful Recurrent Neural Networks}
-As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
+As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used directly in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
 \begin{figure}
 	\begin{tikzpicture}
 	[gap/.style={},layer/.style={rectangle,draw}, error/.style={red}]
@@ -162,16 +168,47 @@ Since tensorflow requires for state-full RNNs that the batch size is a fixed par
 	modelP.set_weights(modelT.get_weights())
 \end{minted}
 \section{Evaluation}
-Quality of the different networks is evaluated with validation sets of size $~1000$ generated from distinct seeds.
-
-* full scale vs low res guiding
-* network size (units, length)
-* residual layers
-* spatial vs frequency output
+Quality of the different networks is evaluated on validation sets of size $~1000$ generated with the same setup as the training process, but different seeds for the random number generator.
+\subsection{Network Objective}
+\begin{figure}
+	\begin{tikzpicture}
+	\begin{axis}[ymode=log, legend pos = south east, xlabel=timesteps $t$, ylabel=$(\zeta - \hat{\zeta})^2$]
+	\addplot+[mark size=1pt] table[x=t, y=FullRes, col sep=comma]{data/fullres.csv};
+	\addlegendentry{FullRes}
+	\addplot+[mark size=1pt] table[x=t, y=Conv, col sep=comma]{data/fullres.csv};
+	\addlegendentry{Conv}
+	\addplot+[mark size=1pt] table[x=t, y=LowFreq, col sep=comma]{data/fullres.csv};
+	\addlegendentry{LowFreq}
+	\end{axis}
+	\end{tikzpicture}
+	\caption{Error over time for different approaches.}
+	\label{objectiveError}
+\end{figure}
+First, we take a look at two different possible objectives. Either to perform the full simulation where the outputs are fed back as input for the next step, or to generate details from a lower frequency simulation.
+In Figure~\ref{objectiveError} the mse for these approaches is shown, with the addition of a purely convolutional network without recurrent units for the former approach. Unsurprisingly, the full resolution networks perform better initially, since they mostly have to reproduce the input. However, the outputs quickly diverge from the expected results until settling in a stable loop.
+\begin{figure}
+	\includegraphics[width=0.5\textwidth]{imgs/fullres_series.png}
+	\caption{Closed loop network after 1, 8, 32, 64 step.}
+	\label{closedLoop}
+\end{figure}
+A closer look at the outputs of FullRes in Figure~\ref{closedLoop} shows that while some major features of the scene are preserved, details are lost and artefacts have formed. On the other hand, the upscaling approach improves for over 40 steps while filling its internal memory and then continues to produce approximation of the expected state. Thus, in following experiments we attempt to improve on the second approach.
+\subsection{Network Size}
+* unit size larger impact than length
+* but problematic due to increase in weights
+\subsection{Batch and Window Size}
+* larger window size better results
+* larger batches quicker convergence at no cost to quality
+\subsection{Frequency IO}
+* similar success but outputs require large number of weights
+\subsection{Additional Inputs}
+* overall worse performance
+* loss of details?
+* providing additional inputs can mitegrate somewhat
 \section{Conclusion}
 \subsection{Limitations}
-* preserving sufficient information
-* producing full output resolution too many weights since similarity can not be used
+* preserving sufficient details since state is too small
+* producing full resolution frequency too many weights since similarity can not be used
+* computing time should be lower than the numerical simulation
 \subsection{Future Work}
 * convlstm
 * tilebased
