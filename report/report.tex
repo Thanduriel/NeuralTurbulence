@@ -40,8 +40,8 @@
 \maketitle
 
 \section{Introduction}
-In fluid dynamics, turbulence remains an unsolved problem. While the dynamics are described by the Navier-Stokes equations, a numerical simulation of sufficiently high resolution, where turbulence operates, remains infeasible. On a statistical level however, the different scales of frequencies are known to follow the Kolmogorov cascade, an observation which has been used to generate turbulence with plausible energy distributions and temporal coherence \cite{kim2008wavelet}. \\
-Neural networks have enjoyed success in an increasingly wide range of problems, including classification, long term decision-making and image synthesis.
+In fluid dynamics, the behaviour of turbulence remains an unsolved problem. While the dynamics are described by the Navier-Stokes equations, a numerical simulation of sufficiently high resolution, where turbulence occurs, remains infeasible. On a statistical level however, the different scales of frequencies are known to follow the Kolmogorov energy cascade, an observation which has been used to generate turbulence with plausible energy distributions and temporal coherence \cite{kim2008wavelet}. \\
+Neural networks have enjoyed success in an increasingly wide range of problems beyond classification, including long term predictions and image synthesis.
 Recently, recurrent neural networks (RNNs) have been considered to predict chaotic physical systems; see \cite{vlachas2019forecasting} for a comparison off different approaches.
 The possibility of having a RNN learn to simulate a turbulent flow is explored in this report.
 \section{Network Architecture}
@@ -50,12 +50,13 @@ Instead of directly operating on $\vec{u}$, the fluid's vorticity $\zeta$
 \[
 \zeta = \curl{\vec{u}},
 \]
-is used. Assuming that $\vec{u}$ is divergence free, $\zeta$ is sufficient to reconstruct the vector-field. In 2D, the vorticity is a scalar-field, thus reducing the number of dimensions and making it easy to visualize.
+is used. Assuming that $\vec{u}$ is divergence free, $\zeta$ is sufficient to reconstruct the complete vector-field. In 2D, the vorticity is a scalar-field, thus reducing the number of dimensions to operate on and making it easy to visualize.
 \subsection{Inputs and Outputs}
-As input, both the full $\zeta$ from the previous time step and the current state of simulation with lower resolution by factor $s$ are considered. 
+As input, both the full $\zeta$ from the previous time step and the current state of a simulation with lower resolution with scale $s$ are considered. 
 In addition, parameters describing the variable parts of the scene, such as the size of the obstacle and inflow velocity may be given.
 As output, the high resolution $\zeta$ is expected.
-When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to create the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case multiple dense layers with non-linear activation functions are applied to match the correct sizes. Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels.
+When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to construct the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case the outputs are handled by multiple dense layers of increasing size with hyperbolic tangent activations and single dense layer with linear activation at the end to match the correct output size.\\
+ Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels.
 \subsection{Recurrent Layers}
 \begin{figure}
 	\begin{tikzpicture}
@@ -79,8 +80,7 @@ When operating on the spatial data, a stack of convolutional layers is used to e
 	\caption{Residual Layers.}
 	\label{residualLayers}
 \end{figure}
-The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. The idea is that the layer then does not need to learn to reproduce most of its inputs and can instead focus only on modifications. This generally improves the training success, especially for longer networks, at low costs for both training and execution since no extra weights are needed and tensor addition operations are cheap \cite{he2016deep}. \\
-%todo read paper again to verify reasoning
+The main work is done by the recurrent layers, for which both Long Short-Term Memory(LSTM) and Gated Recurrent Units(GRU) are suitable. Where dimensions are compatible, residual connections are inserted, adding together the inputs and outputs of the current layer as shown by Figure~\ref{residualLayers}. The idea is that the task of learning just modifications instead of the full mapping is simpler. This generally improves the training success, especially for longer networks, at low costs for both training and execution since no extra weights are needed and tensor addition operations are cheap \cite{he2016deep}. \\
 An important parameter of the recurrent layers is their state-fullness. Usually RNNs are fed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies in the data. Thus, only state-full networks are considered here.
 %todo refs
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -120,17 +120,18 @@ Since $\zeta$ is real, symmetries in $Z$ allow the use of only the upper quadran
 	\caption{Input and outputs from $Z(u,v)$.}
 	\label{lowFreqs}
 \end{figure}
-As optimizer, RMSprop with default arguments \cite{RMSprop} is used. Other options such as stochastic gradient descent and Adam where briefly considered but seem to perform worse. As loss functions the mean square error 
-\begin{equation}
-	\sum_{x}\sum_{y} (\zeta(x,y) - \hat{\zeta}(x,y))^2,
-\end{equation}
+As optimizer, RMSprop with default arguments \cite{RMSprop} is used. Other options such as stochastic gradient descent and Adam where briefly considered but seem to perform worse. As loss functions, the mean square error 
+\begin{equation}\label{eq:mse}
+	\frac{1}{n_s}\sum_{x}\sum_{y} (\zeta(x,y) - \hat{\zeta}(x,y))^2,
+\end{equation}\label{eq:ferr}
 for spatial outputs and
 \begin{equation}
-\sum_{u}\sum_{v} |Z(u,v) - \hat{Z}(u,v)|^2,
-\end{equation} for frequency outputs are taken.
-Instead of a fixed size data set, the generator pattern is used. The numerical simulation can provide a continuous stream of new data, minimizing the risk of over-fitting. Also, usual processing such as shuffling and batching the data after each epoch pose problems with the consistent state of the network over multiple training steps.
+\frac{1}{n_f}\sum_{u}\sum_{v} |Z(u,v) - \hat{Z}(u,v)|^2,
+\end{equation}
+for frequency outputs are taken.\\
+Instead of a fixed size data set, the generator pattern is used. The numerical simulation can provide a continuous stream of new data, minimizing the risk of over-fitting. Also, common data preprocessing such as shuffling and batching after each epoch pose problems with the persistent state of the network over multiple training steps.
 \subsection{Stateful Recurrent Neural Networks}
-As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is used directly in the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
+As mentioned before, RNN layers use a special training process displayed in Figure~\ref{rnnTraining}. Instead of passing through one sample and back propagating the error, $k$ time steps are processed by a loop and only the final output is forwarded to the error computation. During back propagation, the loop is unrolled, effectively stacking the same layer multiple times. 
 \begin{figure}
 	\begin{tikzpicture}
 	[gap/.style={},layer/.style={rectangle,draw}, error/.style={red}]
@@ -168,8 +169,8 @@ Since tensorflow requires for state-full RNNs that the batch size is a fixed par
 	modelP.set_weights(modelT.get_weights())
 \end{minted}
 \section{Evaluation}
-Quality of the different networks is evaluated on validation sets of size $~1000$ generated with the same setup as the training process, but different seeds for the random number generator.
-\subsection{Network Objective}
+Quality of the different networks is evaluated on validation sets of size $1024$ generated with the same setup as the training process, but varying seeds for the random number generator.
+\subsection{Network Objective}\label{sec:eva:objective}
 \begin{figure}
 	\begin{tikzpicture}
 	\begin{axis}[ymode=log, legend pos = south east, xlabel=timesteps $t$, ylabel=$(\zeta - \hat{\zeta})^2$]
@@ -188,22 +189,44 @@ First, we take a look at two different possible objectives. Either to perform th
 In Figure~\ref{objectiveError} the mse for these approaches is shown, with the addition of a purely convolutional network without recurrent units for the former approach. Unsurprisingly, the full resolution networks perform better initially, since they mostly have to reproduce the input. However, the outputs quickly diverge from the expected results until settling in a stable loop.
 \begin{figure}
 	\includegraphics[width=0.5\textwidth]{imgs/fullres_series.png}
-	\caption{Closed loop network after 1, 8, 32, 64 step.}
+	\caption{Closed loop network after 1, 8, 32, 64 steps.}
 	\label{closedLoop}
 \end{figure}
 A closer look at the outputs of FullRes in Figure~\ref{closedLoop} shows that while some major features of the scene are preserved, details are lost and artefacts have formed. On the other hand, the upscaling approach improves for over 40 steps while filling its internal memory and then continues to produce approximation of the expected state. Thus, in following experiments we attempt to improve on the second approach.
+\subsection{Frequency and Spatial IO}
+To compare spatial(S) and frequency(F) inputs/outputs, the same inner RNN is combined with appropriate outer processing. Since these additional layers can have a significant impact on the achieved quality, network with similar execution times are considered. In Table~\ref{tab:freqIO}, average times for a single step are shown in addition to the average errors \eqref{eq:mse} and the square root of \eqref{eq:ferr}.
+\begin{table}
+\centering
+\caption{Error for different IO approaches.}
+\label{tab:freqIO}
+\begin{tabular}{lccc}
+	\hline
+	    & S error & F error & t in s \\ \hline
+	input           & 0.0277 & 7.9214 & 0.0000 \\
+	S$\rightarrow$S & 0.0077 & 4.6925 & 0.0046 \\
+	F$\rightarrow$S & 0.0081 & 4.7448 & 0.0045 \\
+	F$\rightarrow$F & 0.0080 & 4.3151 & 0.0037 \\
+	S$\rightarrow$F & 0.0074 & 4.1384 & 0.0037 \\ \hline
+\end{tabular}
+\end{table}
+All variants minimize both error measures to a certain extend, when compared to the upscaled input.
+From these aggregate values it does seem howver, like extracting relevant features works better from the spatial view. For the outputs, expecting frequency leads to far better frequency results and similar spatial error.
+A more detailed look at the power spectrum summed up over the v-axis in Figure~\ref{powerspectrum} and averaged over a whole validation set, reveals that both output variants manage to reproduce some details across all frequencies. However, the deconvolutional versions exhibit larger deviations in higher frequencies.
+\begin{figure}
+	\includegraphics[width=0.5\textwidth]{imgs/powerspectrum.pdf}
+	\caption{Power spectrum of different IO approaches.}
+	\label{powerspectrum}
+\end{figure}
 \subsection{Network Size}
 * unit size larger impact than length
 * but problematic due to increase in weights
 \subsection{Batch and Window Size}
 * larger window size better results
 * larger batches quicker convergence at no cost to quality
-\subsection{Frequency IO}
-* similar success but outputs require large number of weights
 \subsection{Additional Inputs}
 * overall worse performance
 * loss of details?
-* providing additional inputs can mitegrate somewhat
+* providing additional inputs can mitegrate to some extend
 \section{Conclusion}
 \subsection{Limitations}
 * preserving sufficient details since state is too small
@@ -212,6 +235,7 @@ A closer look at the outputs of FullRes in Figure~\ref{closedLoop} shows that wh
 \subsection{Future Work}
 * convlstm
 * tilebased
+* combine \ref{sec:eva:objective}
 
 \bibliographystyle{ieeetr}
 %\bibliographystyle{ACM-Reference-Format}
