@@ -25,3 +25,8 @@ def loadDataSet(path, windowSize, useLagWindows=False):
 	outputs = { Inputs.VORTICITY.asOut() : ioext.createOutputSeries(ioext.loadNPData(path + "OUT_VORTICITY_*.npy"), windowSize, useLagWindows)}
 
 	return inputs, outputs, vortInputs
+
+def getDataSetName(name, scale, inpF, outpF, reducedOut, seed):
+	inp = "F" if inpF else "S"
+	outp = "F" if outpF else "S"
+	return "{}_{}_{}_{}_{}_{}".format(name,scale,inp,outp,reducedOut,seed)
