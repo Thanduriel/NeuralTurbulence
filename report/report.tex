@@ -84,7 +84,7 @@ The main work is done by the recurrent layers, for which both Long Short-Term Me
 An important parameter of the recurrent layers is their state-fullness. Usually RNNs are fed a fixed number of steps to predict the next step, after which the internal memory of each unit is reset to $0$. For a simulation, processing just one time step should yield the next one. Also, the training can impose some practical limits on the number of time steps given as input, which may be shorter than some long term dependencies in the data. Thus, only state-full networks are considered here.
 %todo refs
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Training Setup}
+\section{Training Setup}\label{sec:training}
 \begin{figure}
 	\begin{tikzpicture}
 	\node[anchor=south west,inner sep=0] (image) at (0,0) {\includegraphics[width=0.45\textwidth]{imgs/scene.png}};
@@ -218,11 +218,60 @@ A more detailed look at the power spectrum summed up over the v-axis in Figure~\
 	\label{powerspectrum}
 \end{figure}
 \subsection{Network Size}
-* unit size larger impact than length
-* but problematic due to increase in weights
-\subsection{Batch and Window Size}
-* larger window size better results
-* larger batches quicker convergence at no cost to quality
+How the size of the recurrent layers impacts the results is explored in Table~\ref{tab:size}. Both the number of layers and the size of each unit have only minor effects and diminishing returns. Going from $1$ layer to $5$ layers decreases the measured spatial error by just $2.5\%$ and from $3$ to $5$ the frequency error does not improve at all.
+Similar observations are made for the unit size, where going from $40$ to $120$ gives a $5\%$ improvement in spatial error while the difference from $80$ to $120$ is only $1\%$.
+\begin{table}
+	\centering
+	\caption{Size variations of the recurrent layers.}
+	\label{tab:size}
+	\begin{tabular}{lccccc}
+		\hline
+		      & layers & unit size & S error & F error & t in s \\ \hline
+		Len1  &   1    &    80     & 0.0077  & 4.2271  & 0.0037 \\
+		Len2  &   3    &    80     & 0.0076  & 4.1755  & 0.0042 \\
+		Len3  &   5    &    80     & 0.0075  & 4.1773  & 0.0046 \\
+		Size1 &   3    &    40     & 0.0079  & 4.2675  & 0.0040 \\ 
+		Size3 &   3    &    120    & 0.0075  & 4.1768  & 0.0042 \\ \hline
+	\end{tabular}
+\end{table}
+\subsection{Window and Batch Size}
+To determine the impact of training parameters on the success, we train the same model architecture for $50$ epochs on the same simulation but organize the data with varying window(w)- and batch(b)-sizes. How the loss on the validation set changes, is plotted in Figure~\ref{bwsize}.
+\begin{figure}
+	\begin{tikzpicture}
+	\begin{axis}[legend style={at={(1.05,1.0)}, anchor=north}, xlabel=epochs $t$]
+	\addplot+[mark size=1pt] table[x=epoch, y=W1B1, col sep=comma]{data/wbsize.csv};
+	\addlegendentry{1 1}
+	\addplot+[mark size=1pt] table[x=epoch, y=W1B32, col sep=comma]{data/wbsize.csv};
+	\addlegendentry{1 32}
+	\addplot+[mark size=1pt] table[x=epoch, y=W4B4, col sep=comma]{data/wbsize.csv};
+	\addlegendentry{4 4}
+	\addplot+[mark size=1pt] table[x=epoch, y=W8B4, col sep=comma]{data/wbsize.csv};
+	\addlegendentry{8 4}
+	\addplot+[mark size=1pt] table[x=epoch, y=W16B4, col sep=comma]{data/wbsize.csv};
+	\addlegendentry{16 4}
+	\addplot+[mark size=1pt] table[x=epoch, y=W16B16, col sep=comma]{data/wbsize.csv};
+	\addlegendentry{16 16}
+	\end{axis}
+	\end{tikzpicture}
+	\caption{Frequency error during training with inputs (w b).}
+	\label{bwsize}
+\end{figure}
+To have the recurrent layers learn anything meaningful, windows of size larger than $1$ seem necessary. Both (1 1) and (1 32) show no improvement after the initial epoch, while (4 4) has an overall down trend. Further increasing the size to (8 4) or even (16 4) lead to even better results, but with diminishing returns. Also, the training time per epoch increases by more than $50\%$, as shown in Table~\ref{tab:bwsize}.\\
+For the other parameter, mini batches of size $4$ help prevent overhitting due to similarity of the consecutive time steps. Furthermore, a larger batch size leads to convergence in fewer epochs at no cost to the quality of the result. Since back-propagation takes the majority of the time during the training process, as seen by a duration increase of less than $1\%$ from (16 4) to (16 16), this is also huge practical advantage in terms of training time required. With our training setup however, the time it takes to fill the data buffer is proportional to $w*b$, which imposes an upper bound to the possible speedup.
+\begin{table}
+	\centering
+	\caption{Training times depending on batch- and window size.}
+	\label{tab:bwsize}
+	\begin{tabular}{ccc}
+		\hline
+		window  & batch  & t in ms \\ \hline
+		1  & 32 &   53    \\
+		4  & 4  &   154   \\
+		8  & 4  &   232   \\
+		16 & 4  &   370   \\
+		16 & 16 &   373   \\ \hline
+	\end{tabular}
+\end{table}
 \subsection{Additional Inputs}
 * overall worse performance
 * loss of details?

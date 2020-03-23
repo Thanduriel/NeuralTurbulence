@@ -19,3 +19,9 @@ timeseries/currentModel/
 *.aux
 *.bbl
 *.blg
+
+*.pygtex
+*.pygstyle
+!report/imgs/*.pdf
+!report/imgs/*.png
+!report/data/
