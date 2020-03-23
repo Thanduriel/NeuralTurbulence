@@ -152,7 +152,7 @@ sourceSize = (int(math.ceil(res*0.081))*2, int(math.ceil(res*0.1)))
 sourcePos  = (int(res*0.5) - sourceSize[0] // 2, 1)
 #sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
 
-if args.showGui:
+if args.showGui or True:
 	gui = Gui()
 	gui.show()
 
@@ -190,6 +190,7 @@ def generateData(offset, batchSize):
 	lowPass = np.array((resIn,resIn+1))
 	historyPtr = 0
 	velInflow = vec3(np.random.uniform(-0.02,0.02), 0, 0)
+	obsCurRadius = obsRad
 
 	t = 0
 	start = time.time()
@@ -273,11 +274,13 @@ def generateData(offset, batchSize):
 			inflow = dif[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1]] if not useFullResInflow else np.reshape(dif[:,::-1], outputResFull)
 			moveWindow(slidingWindow[INFLOW], inflow)
 		if useInflowVelInput:
-			velocity = gridext.toNumpyArray(vel,simResRed+(2,))
-			inflow = velocity[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1]] if not useFullResInflow else np.reshape(dif[:,::-1], outputResFull)
+			velocity = np.zeros(simResRed+(3,))
+			copyGridToArrayMAC(vel, velocity)
+			print(velocity[:,:,1])
+			inflow = velocity[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1],0:2] if not useFullResInflow else np.reshape(velocity[:,::-1], outputResFull) # todo fix last dim
 			moveWindow(slidingWindow[INFLOWVEL], inflow)
 		if useObstacleInput:
-			moveWindow(slidingWindow[OBSTACLE], obsCurSize)
+			moveWindow(slidingWindow[OBSTACLE], obsCurRadius)
 		
 		# record history
 		if t > offset and (t % windowSize == 0 or useLagWindows):
@@ -323,6 +326,11 @@ def generateData(offset, batchSize):
 #			end = time.time()
 #			print(end - start)
 #			start = time.time()
+
+gen = generateData(10, 1)
+for i in range(10):
+	next(gen)
+exit()
 if writeData:
 	dataPath = "data/{}_{}_{}_{}_{}_{}".format(dataName, inOutScale, inputFormat.name[0], outputFormat.name[0], useReducedOutput, npSeed)
 	if not os.path.exists(dataPath):
