@@ -256,7 +256,7 @@ To determine the impact of training parameters on the success, we train the same
 	\caption{Frequency error during training with inputs (w b).}
 	\label{bwsize}
 \end{figure}
-To have the recurrent layers learn anything meaningful, windows of size larger than $1$ seem necessary. Both (1 1) and (1 32) show no improvement after the initial epoch, while (4 4) has an overall down trend. Further increasing the size to (8 4) or even (16 4) lead to even better results, but with diminishing returns. Also, the training time per epoch increases by more than $50\%$, as shown in Table~\ref{tab:bwsize}.\\
+To have the recurrent layers learn anything meaningful, windows of size larger than $1$ seem necessary. Both (1 1) and (1 32) show no improvement after the initial epoch, while (4 4) has an overall down trend. Further increasing the size to (8 4) or even (16 4) lead to even better results, but with diminishing returns. Also, the training time per epoch increases by more than $50\%$ each time, as shown in Table~\ref{tab:bwsize}.\\
 For the other parameter, mini batches of size $4$ help prevent overhitting due to similarity of the consecutive time steps. Furthermore, a larger batch size leads to convergence in fewer epochs at no cost to the quality of the result. Since back-propagation takes the majority of the time during the training process, as seen by a duration increase of less than $1\%$ from (16 4) to (16 16), this is also huge practical advantage in terms of training time required. With our training setup however, the time it takes to fill the data buffer is proportional to $w*b$, which imposes an upper bound to the possible speedup.
 \begin{table}
 	\centering
@@ -277,13 +277,26 @@ For the other parameter, mini batches of size $4$ help prevent overhitting due t
 * loss of details?
 * providing additional inputs can mitegrate to some extend
 \section{Conclusion}
+In conclusion, even a moderately sized recurrent neural network can learn some turbulent fluid dynamics. When guided by a low resolution simulation, the prediction quality remains stable over a long time.
+Similar dynamics can be learned operating in either the spatial or frequency domain, although best results where achieved with spatial input and frequency output.
+In the training of a state-full RNN for this task, large windows and the use of batches are essential and larger batches proof useful to accelerate the process.
+* architecture allows for some generalisation, augmentation with additional inputs beneficial
+* results lag in details, architecture does not scale
 \subsection{Limitations}
+The main limitation of the explored approach is that the internal state is far too small to preserve details in the scene. Since number of weights in the dense layers scales quadratic with the layers size, simply enlarging the state to the scene resolution is not feasible.
+In particular 
 * preserving sufficient details since state is too small
 * producing full resolution frequency too many weights since similarity can not be used
 * computing time should be lower than the numerical simulation
 \subsection{Future Work}
+There are a number of potential approaches which circumvent the above mentioned problem. \\
+By dividing the scene into smaller tiles, each simulated by another instance of the same network, only local influences are taken into account, considerably reducing the required size. One difficulty would be to propagate changes from a tile to its neighbours in each step over a shared border.\\
+Another way could be to consider the physical model of eddies splitting into ever smaller ones until difundating.
+%todo see initial paper again
+With this in mind, multiple networks could be trained to each produce only a narrow frequency band given a band of lower frequencies. \\
+With a look back at Section~\ref{sec:eva:objective} the first attempt using a closed loop network does not have this problem, as the full state is kept externally. \\
+* different training process as GAN ref paper?
 * convlstm
-* tilebased
 * combine \ref{sec:eva:objective}
 
 \bibliographystyle{ieeetr}
