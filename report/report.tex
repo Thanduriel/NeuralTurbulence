@@ -55,8 +55,9 @@ is used. Assuming that $\vec{u}$ is divergence free, $\zeta$ is sufficient to re
 As input, both the full $\zeta$ from the previous time step and the current state of a simulation with lower resolution with scale $s$ are considered. 
 In addition, parameters describing the variable parts of the scene, such as the size of the obstacle and inflow velocity may be given.
 As output, the high resolution $\zeta$ is expected.
-When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to construct the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case the outputs are handled by multiple dense layers of increasing size with hyperbolic tangent activations and single dense layer with linear activation at the end to match the correct output size.\\
- Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels.
+When operating on the spatial data, a stack of convolutional layers is used to extract important features and deconvolutional layers to construct the full resolution output. Alternately, inputs and outputs can also be directly given in a frequency domain, in which case the outputs are handled by multiple dense layers of increasing size with hyperbolic tangent activations and single dense layer with linear activation at the end to match the correct output size.
+Since tensorflow has limited support for complex numbers, real and imaginary parts are separated into two float channels. \\
+Additional scene parameters given as scalar inputs are first processed by a small LSTM unit and then concatenated with the other processed inputs before the recurrent layers.
 \subsection{Recurrent Layers}
 \begin{figure}
 	\begin{tikzpicture}
@@ -96,7 +97,7 @@ An important parameter of the recurrent layers is their state-fullness. Usually 
 	\caption{The Scene.}
 	\label{trainingScene}
 \end{figure}
-The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above when the streams merge. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity may be applied to the input.
+The training setup, as shown rotated by $\ang{90}$ in Figure~\ref{trainingScene}, consists of a source at the bottom, where smoke flows in and a circular obstacle above it. Through buoyancy, the smoke flows around the obstacle on both sides, causing turbulence in the area above when the streams merge. To add some variation, noise is applied to the inflow. Also the obstacle size can be changed and some random initial velocity may be applied to the input periodically.
 Advection is computed with a second order semi Lagrangian scheme.\\
 The low resolution inputs for the purpose of training are extracted from the 2D discrete Fourier Transform 
 \[
@@ -185,7 +186,7 @@ Quality of the different networks is evaluated on validation sets of size $1024$
 	\caption{Error over time for different approaches.}
 	\label{objectiveError}
 \end{figure}
-First, we take a look at two different possible objectives. Either to perform the full simulation where the outputs are fed back as input for the next step, or to generate details from a lower frequency simulation.
+First, we take a look at two different possible objectives. Either to perform the full simulation where the outputs are fed back as input for the next step, or to generate details from a lower frequency simulation ($s=8$).
 In Figure~\ref{objectiveError} the mse for these approaches is shown, with the addition of a purely convolutional network without recurrent units for the former approach. Unsurprisingly, the full resolution networks perform better initially, since they mostly have to reproduce the input. However, the outputs quickly diverge from the expected results until settling in a stable loop.
 \begin{figure}
 	\includegraphics[width=0.5\textwidth]{imgs/fullres_series.png}
@@ -209,8 +210,8 @@ To compare spatial(S) and frequency(F) inputs/outputs, the same inner RNN is com
 	S$\rightarrow$F & 0.0074 & 4.1384 & 0.0037 \\ \hline
 \end{tabular}
 \end{table}
-All variants minimize both error measures to a certain extend, when compared to the upscaled input.
-From these aggregate values it does seem howver, like extracting relevant features works better from the spatial view. For the outputs, expecting frequency leads to far better frequency results and similar spatial error.
+All variants minimize both error measures to a certain extent, when compared to the upscaled input.
+From these aggregate values it does seem however, like extracting relevant features works better from the spatial view. For the outputs, expecting frequency leads to far better frequency results and similar spatial error.
 A more detailed look at the power spectrum summed up over the v-axis in Figure~\ref{powerspectrum} and averaged over a whole validation set, reveals that both output variants manage to reproduce some details across all frequencies. However, the deconvolutional versions exhibit larger deviations in higher frequencies.
 \begin{figure}
 	\includegraphics[width=0.5\textwidth]{imgs/powerspectrum.pdf}
@@ -218,7 +219,7 @@ A more detailed look at the power spectrum summed up over the v-axis in Figure~\
 	\label{powerspectrum}
 \end{figure}
 \subsection{Network Size}
-How the size of the recurrent layers impacts the results is explored in Table~\ref{tab:size}. Both the number of layers and the size of each unit have only minor effects and diminishing returns. Going from $1$ layer to $5$ layers decreases the measured spatial error by just $2.5\%$ and from $3$ to $5$ the frequency error does not improve at all.
+How the size of the recurrent layers impacts the results is explored in Table~\ref{tab:size}. Both the number of layers and the size of each unit appear to have only minor effects and diminishing returns. Going from $1$ layer to $5$ layers decreases the measured spatial error by just $2.5\%$ and from $3$ to $5$ the frequency error does not improve at all.
 Similar observations are made for the unit size, where going from $40$ to $120$ gives a $5\%$ improvement in spatial error while the difference from $80$ to $120$ is only $1\%$.
 \begin{table}
 	\centering
@@ -257,7 +258,7 @@ To determine the impact of training parameters on the success, we train the same
 	\label{bwsize}
 \end{figure}
 To have the recurrent layers learn anything meaningful, windows of size larger than $1$ seem necessary. Both (1 1) and (1 32) show no improvement after the initial epoch, while (4 4) has an overall down trend. Further increasing the size to (8 4) or even (16 4) lead to even better results, but with diminishing returns. Also, the training time per epoch increases by more than $50\%$ each time, as shown in Table~\ref{tab:bwsize}.\\
-For the other parameter, mini batches of size $4$ help prevent overhitting due to similarity of the consecutive time steps. Furthermore, a larger batch size leads to convergence in fewer epochs at no cost to the quality of the result. Since back-propagation takes the majority of the time during the training process, as seen by a duration increase of less than $1\%$ from (16 4) to (16 16), this is also huge practical advantage in terms of training time required. With our training setup however, the time it takes to fill the data buffer is proportional to $w*b$, which imposes an upper bound to the possible speedup.
+For the batch size, mini batches of size $4$ help prevent the overhitting present due to similarity of the consecutive time steps. Furthermore, a larger batch size leads to convergence in fewer epochs at no cost to the quality of the result. Since back-propagation takes the majority of the time during the training process, as seen by a duration increase of less than $1\%$ from (16 4) to (16 16), this is also huge practical advantage in terms of training time required. With our training setup however, the time it takes to fill the data buffer is proportional to $w*b$, which imposes an upper bound to the effective speed up.
 \begin{table}
 	\centering
 	\caption{Training times depending on batch- and window size.}
@@ -273,16 +274,65 @@ For the other parameter, mini batches of size $4$ help prevent overhitting due t
 	\end{tabular}
 \end{table}
 \subsection{Additional Inputs}
-* overall worse performance
-* loss of details?
-* providing additional inputs can mitegrate to some extend
+Finally, we explore the robustness with respect to a changing scene and how additional information given to the network, impacts the performance. \\ 
+A minor improvement of $~1\%$ is seen from providing the inflow as extra input, which is shown in Table~\ref{tab:errobs} (Ref+Inflow).
+Both with or without however, the models largely fail when variations between $[0.8,1.2]$ to the obstacle size are introduced, with observed errors close to the low resolution simulation.
+By also adjusting the training process with a periodically changing obstacle (Trained), this effect is somewhat mitigated at a cost of $~12\%$ increased error for the simple case.
+Also, giving the obstacle size as input(Trained+Size), similar to the inflow, only slightly improves the results.
+
+\begin{table}
+	\centering
+	\caption{Error with (1) and without (2) changing obstacle size.}
+	\label{tab:errobs}
+	\begin{tabular}{lcccc}
+		\hline
+		              & (1) S error & F error & (2) S error & F error \\ \hline
+		Reference     &   0.0192    & 7.5257  &   0.0076    & 4.2010  \\
+		Ref+Inflow    &   0.0198    & 7.5895  &   0.0075    & 4.1664  \\
+		Trained       &   0.0100    & 4.8752  &   0.0086    & 4.5852  \\
+		Trained+Size  &   0.0099    & 4.8177  &   0.0085    & 4.4513  \\ \hline
+	\end{tabular}
+\end{table}
+
+\begin{figure}
+	\includegraphics[width=0.5\textwidth]{imgs/addinputs_comparison.png}
+	\caption{Output when trained with different scenes: original simulation, static, obstacle size, obstacle size  + inflow velocity.}
+	\label{addinputs_img}
+\end{figure}
+
+\begin{figure}
+	\begin{tikzpicture}
+	\begin{axis}[legend style={at={(0.45,0.98)}, anchor=north}]%ymin=2, ymax=7
+	\addplot+[mark=none, each nth point=1] table[x=step, y=inflowVel, col sep=comma]{data/general.csv};
+	\addlegendentry{Train+Vel};
+	\addplot+[mark=none, each nth point=1] table[x=step, y=train, col sep=comma]{data/general.csv};
+	\addlegendentry{Train};
+	\addplot+[mark=none, each nth point=1] table[x=step, y=ref, col sep=comma]{data/general.csv};
+	\addlegendentry{Ref};
+%	\addplot +[mark=none] coordinates {({axis cs:200,0}|-{rel axis cs:0,0}) ({axis cs:200,0}|-{rel axis cs:0,1})};
+	% inflow
+	\draw[color=blue!40] ({axis cs:32,0}|-{rel axis cs:0,0}) -- ({axis cs:32,0}|-{rel axis cs:0,1});
+	\draw[color=blue!40] ({axis cs:398,0}|-{rel axis cs:0,0}) -- ({axis cs:398,0}|-{rel axis cs:0,1});
+	\draw[color=blue!40] ({axis cs:746,0}|-{rel axis cs:0,0}) -- ({axis cs:746,0}|-{rel axis cs:0,1});
+	% obstacle
+	\draw[color=gray!40] ({axis cs:100,0}|-{rel axis cs:0,0}) -- ({axis cs:100,0}|-{rel axis cs:0,1});
+	\draw[color=gray!40] ({axis cs:377,0}|-{rel axis cs:0,0}) -- ({axis cs:377,0}|-{rel axis cs:0,1});
+	\draw[color=gray!40] ({axis cs:654,0}|-{rel axis cs:0,0}) -- ({axis cs:654,0}|-{rel axis cs:0,1});
+	\draw[color=gray!40] ({axis cs:931,0}|-{rel axis cs:0,0}) -- ({axis cs:931,0}|-{rel axis cs:0,1});
+	\addlegendentry{Test}
+	\end{axis}
+	\end{tikzpicture}
+	\caption{Spatial error over time with changing obstacle size (gray) and inflow velocity (blue).}
+	\label{inflVelSteps}
+\end{figure}
+
 \section{Conclusion}
 In conclusion, even a moderately sized recurrent neural network can learn some turbulent fluid dynamics. When guided by a low resolution simulation, the prediction quality remains stable over a long time.
-Similar dynamics can be learned operating in either the spatial or frequency domain, although best results where achieved with spatial input and frequency output.
+Similar dynamics can be learned by operating in either the spatial or frequency domain, although best results where achieved with spatial input and frequency output.
 In the training of a state-full RNN for this task, large windows and the use of batches are essential and larger batches proof useful to accelerate the process.
 * architecture allows for some generalisation, augmentation with additional inputs beneficial
 * results lag in details, architecture does not scale
-\subsection{Limitations}
+%\subsection{Limitations}
 The main limitation of the explored approach is that the internal state is far too small to preserve details in the scene. Since number of weights in the dense layers scales quadratic with the layers size, simply enlarging the state to the scene resolution is not feasible.
 In particular 
 * preserving sufficient details since state is too small
@@ -303,4 +353,9 @@ With a look back at Section~\ref{sec:eva:objective} the first attempt using a cl
 %\bibliographystyle{ACM-Reference-Format}
 %\nocite{*}
 \bibliography{references}
+
+\appendix
+\section{Example Networks}
+trololo
+
 \end{document}
