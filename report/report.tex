@@ -276,39 +276,42 @@ For the batch size, mini batches of size $4$ help prevent the overhitting presen
 \subsection{Additional Inputs}
 Finally, we explore the robustness with respect to a changing scene and how additional information given to the network, impacts the performance. \\ 
 A minor improvement of $~1\%$ is seen from providing the inflow as extra input, which is shown in Table~\ref{tab:errobs} (Ref+Inflow).
-Both with or without however, the models largely fail when variations between $[0.8,1.2]$ to the obstacle size are introduced, with observed errors close to the low resolution simulation.
-By also adjusting the training process with a periodically changing obstacle (Trained), this effect is somewhat mitigated at a cost of $~12\%$ increased error for the simple case.
-Also, giving the obstacle size as input(Trained+Size), similar to the inflow, only slightly improves the results.
-
 \begin{table}
 	\centering
 	\caption{Error with (1) and without (2) changing obstacle size.}
 	\label{tab:errobs}
 	\begin{tabular}{lcccc}
 		\hline
-		              & (1) S error & F error & (2) S error & F error \\ \hline
-		Reference     &   0.0192    & 7.5257  &   0.0076    & 4.2010  \\
-		Ref+Inflow    &   0.0198    & 7.5895  &   0.0075    & 4.1664  \\
-		Trained       &   0.0100    & 4.8752  &   0.0086    & 4.5852  \\
-		Trained+Size  &   0.0099    & 4.8177  &   0.0085    & 4.4513  \\ \hline
+		& (1) S error & F error & (2) S error & F error \\ \hline
+		Reference  &   0.0192    & 7.5257  &   0.0076    & 4.2010  \\
+		Ref+Inflow &   0.0198    & 7.5895  &   0.0075    & 4.1664  \\
+		TrainObs     &   0.0100    & 4.8752  &   0.0086    & 4.5852  \\
+		TrainObs+    &   0.0099    & 4.8177  &   0.0085    & 4.4513  \\
+		TrainVel   &   0.0184    & 7.0310  &   0.0201    & 7.6623  \\
+		TrainVel+  &   0.0178    & 6.5250  &   0.0160    & 6.0167  \\ \hline
 	\end{tabular}
 \end{table}
-
+Both with or without however, the models largely fail when variations between $[0.8,1.2]$ to the obstacle size are introduced, with observed errors close to the low resolution simulation.
+By also adjusting the training process with a periodically changing obstacle (TrainObs), this effect is somewhat mitigated. At a cost of $~12\%$ increased error for the simple setting, the loss in quality can also be seen in Figure~\ref{addinputs_img} from picture 2 to 3, with the right stream appearing notably less sharp above the obstacle.
 \begin{figure}
 	\includegraphics[width=0.5\textwidth]{imgs/addinputs_comparison.png}
 	\caption{Output when trained with different scenes: original simulation, static, obstacle size, obstacle size  + inflow velocity.}
 	\label{addinputs_img}
 \end{figure}
-
+As with the inflow, introducing the obstacle size as input(TrainObs+), only slightly improves the results.\\
+Now modifying the initial velocity has a large impact on the dynamics. The models trained in the environment (TrainVel and TrainVel+) display huge errors on both previous validation sets. With consideration of the fourth picture from Figure~\ref{addinputs_img}, this discrepancy seems to be not primarily caused by a lack of detail, but rather stronger amplitudes. Also, the addition of velocity input has a larger impact with a difference of $25\%$ in the spatial error on validation set (2).
+Meanwhile, this gap does not appear in Figure~\ref{inflVelSteps}, where we take a closer look at the error over time with respect to a scene where both obstacle size and inflow velocity are subject to change.
+In fact, although the model trained without inflow velocity performs much worse overall, the peaks and valleys remain largely the same across all versions and no consistent deviations caused by the extra inputs can be seen.
+*take full advantage
 \begin{figure}
 	\begin{tikzpicture}
 	\begin{axis}[legend style={at={(0.45,0.98)}, anchor=north}]%ymin=2, ymax=7
 	\addplot+[mark=none, each nth point=1] table[x=step, y=inflowVel, col sep=comma]{data/general.csv};
-	\addlegendentry{Train+Vel};
+	\addlegendentry{TrainVel+};
 	\addplot+[mark=none, each nth point=1] table[x=step, y=train, col sep=comma]{data/general.csv};
-	\addlegendentry{Train};
+	\addlegendentry{TrainVel};
 	\addplot+[mark=none, each nth point=1] table[x=step, y=ref, col sep=comma]{data/general.csv};
-	\addlegendentry{Ref};
+	\addlegendentry{TrainObs+};
 %	\addplot +[mark=none] coordinates {({axis cs:200,0}|-{rel axis cs:0,0}) ({axis cs:200,0}|-{rel axis cs:0,1})};
 	% inflow
 	\draw[color=blue!40] ({axis cs:32,0}|-{rel axis cs:0,0}) -- ({axis cs:32,0}|-{rel axis cs:0,1});
