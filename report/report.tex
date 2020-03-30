@@ -169,6 +169,7 @@ Since tensorflow requires for state-full RNNs that the batch size is a fixed par
 \begin{minted}{python}
 	modelP.set_weights(modelT.get_weights())
 \end{minted}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Evaluation}
 Quality of the different networks is evaluated on validation sets of size $1024$ generated with the same setup as the training process, but varying seeds for the random number generator.
 \subsection{Network Objective}\label{sec:eva:objective}
@@ -186,8 +187,8 @@ Quality of the different networks is evaluated on validation sets of size $1024$
 	\caption{Error over time for different approaches.}
 	\label{objectiveError}
 \end{figure}
-First, we take a look at two different possible objectives. Either to perform the full simulation where the outputs are fed back as input for the next step, or to generate details from a lower frequency simulation ($s=8$).
-In Figure~\ref{objectiveError} the mse for these approaches is shown, with the addition of a purely convolutional network without recurrent units for the former approach. Unsurprisingly, the full resolution networks perform better initially, since they mostly have to reproduce the input. However, the outputs quickly diverge from the expected results until settling in a stable loop.
+First, we take a look at two different possible objectives. Either to perform the full simulation where the outputs are fed back as input of the next step, or to generate details from a lower frequency simulation ($s=8$).
+In Figure~\ref{objectiveError} the mse for these approaches is shown, with the addition of a purely convolutional network without recurrent units for the former approach (see Appendix A). Unsurprisingly, the full resolution networks perform better initially, since they mostly have to reproduce the input. However, the outputs quickly diverge from the expected results until settling in a stable loop.
 \begin{figure}
 	\includegraphics[width=0.5\textwidth]{imgs/fullres_series.png}
 	\caption{Closed loop network after 1, 8, 32, 64 steps.}
@@ -298,7 +299,7 @@ By also adjusting the training process with a periodically changing obstacle (Tr
 	\caption{Output when trained with different scenes: original simulation, static, obstacle size, obstacle size  + inflow velocity.}
 	\label{addinputs_img}
 \end{figure}
-As with the inflow, introducing the obstacle size as input(TrainObs+), only slightly improves the results.\\
+As with the inflow, introducing the obstacle size as input(TrainObs+; see Appendix A), only slightly improves the results.\\
 Now modifying the initial velocity has a large impact on the dynamics. The models trained in the environment (TrainVel and TrainVel+) display huge errors on both previous validation sets. With consideration of the fourth picture from Figure~\ref{addinputs_img}, this discrepancy seems to be not primarily caused by a lack of detail, but rather stronger amplitudes. Also, the addition of velocity input has a larger impact with a difference of $25\%$ in the spatial error on validation set (2).
 Meanwhile, this gap does not appear in Figure~\ref{inflVelSteps}, where we take a closer look at the error over time with respect to a scene where both obstacle size and inflow velocity are subject to change.
 In fact, although the model trained without inflow velocity performs much worse overall, the peaks and valleys remain largely the same across all versions and no consistent deviations caused by the extra inputs can be seen.
@@ -332,25 +333,19 @@ In fact, although the model trained without inflow velocity performs much worse 
 \section{Conclusion}
 In conclusion, even a moderately sized recurrent neural network can learn some turbulent fluid dynamics. When guided by a low resolution simulation, the prediction quality remains stable over a long time.
 Similar dynamics can be learned by operating in either the spatial or frequency domain, although best results where achieved with spatial input and frequency output.
-In the training of a state-full RNN for this task, large windows and the use of batches are essential and larger batches proof useful to accelerate the process.
-* architecture allows for some generalisation, augmentation with additional inputs beneficial
-* results lag in details, architecture does not scale
+In the training of a state-full RNN for this task, large windows and the use of batches are essential, with larger batches helping to accelerate the process.
+The architecture can deal with changes to the scene if trained with them in mind at the cost of some visible loss in details and just augmenting it with these parameters as additional inputs is beneficial but not sufficient to alleviate this. \\
+Overall, all the networks have trouble reproducing the smaller details of the flow and simply scaling up the approach is not possible.
 %\subsection{Limitations}
-The main limitation of the explored approach is that the internal state is far too small to preserve details in the scene. Since number of weights in the dense layers scales quadratic with the layers size, simply enlarging the state to the scene resolution is not feasible.
-In particular 
-* preserving sufficient details since state is too small
-* producing full resolution frequency too many weights since similarity can not be used
-* computing time should be lower than the numerical simulation
+The main limitation is that the internal state is far too small to preserve details in the scene. Since number of weights in the dense layers scales quadratic with their size, simply enlarging the state to the scene resolution is not feasible.
+In particular, if frequency output is targeted, just upscaling the outputs from the inner layers already requires a large number of weights, since neither locality nor similarities can easily be exploited.
 \subsection{Future Work}
-There are a number of potential approaches which circumvent the above mentioned problem. \\
+There are a number of potential approaches and tweaks which circumvent the above mentioned problems. Instead of the usual LSTM units, convolutional LSTMs \cite{shi2015convolutional}, which are already implemented in tensorflow, could be employed. If one wants keep using an internal frequency representation, a wavelet basis might be desirable to preserve locality. \\
 By dividing the scene into smaller tiles, each simulated by another instance of the same network, only local influences are taken into account, considerably reducing the required size. One difficulty would be to propagate changes from a tile to its neighbours in each step over a shared border.\\
-Another way could be to consider the physical model of eddies splitting into ever smaller ones until difundating.
-%todo see initial paper again
-With this in mind, multiple networks could be trained to each produce only a narrow frequency band given a band of lower frequencies. \\
-With a look back at Section~\ref{sec:eva:objective} the first attempt using a closed loop network does not have this problem, as the full state is kept externally. \\
-* different training process as GAN ref paper?
-* convlstm
-* combine \ref{sec:eva:objective}
+Another way could be to more closely consider the physical model of eddies scattering into smaller ones in an incompressible fluid according to Kolmogorov's spectrum.
+With this in mind, multiple units could be trained to each produce only a narrow frequency band given a band of lower frequencies. \\
+With a look back at Section~\ref{sec:eva:objective}, the first attempt using a closed loop network does not have the problem of remembering details, as the full state is kept externally. The training process would need to be adjusted to keep the state stable and physically plausible over time. One way to do this could consist of incorporating the loop into the network during training, only providing a low resolution simulation as input and occasionally resetting this internal state to the actual high resolution simulation values.\\
+Finally, all described approaches could profit from a more elaborate loss function as found in the training of generative adversarial networks. In addition to the generator producing the desired output, a second network, the discriminator, is trained to identify real and generated outputs. Such an approach has been applied successfully to generate a super-resolution fluid flow in \cite{xingjian2015convolutional}.
 
 \bibliographystyle{ieeetr}
 %\bibliographystyle{ACM-Reference-Format}
@@ -359,6 +354,15 @@ With a look back at Section~\ref{sec:eva:objective} the first attempt using a cl
 
 \appendix
 \section{Example Networks}
-trololo
+\begin{figure*}
+	\includegraphics[height=\textheight]{imgs/model_full.pdf}
+	\caption{Convolutional network for full resolution inputs ("FullRes").}
+	\label{fullNet}
+\end{figure*}
+\begin{figure*}
+	\includegraphics[width=\textwidth]{imgs/model_allinps.pdf}
+	\caption{Network with spatial input, frequency output and additional scene information ("TrainObs+").}
+	\label{allInputsNet}
+\end{figure*}
 
 \end{document}
