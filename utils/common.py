@@ -10,6 +10,8 @@ class Inputs(Enum):
 	VORTICITY = 0
 	INFLOW    = 1
 	PREVVORT  = 2
+	OBSTACLE  = 3
+	INFLOWVEL = 4
 
 	def asOut(self):
 		return "OUT_" + self.name

@@ -11,6 +11,7 @@ data/
 *.pyc
 
 *.h5
+*.npy
 timeseries/currentModel/
 
 *.out

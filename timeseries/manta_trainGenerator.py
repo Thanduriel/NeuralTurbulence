@@ -24,36 +24,28 @@ from common import *
 
 # Main params
 # ----------------------------------------------------------------------#
-parser = argparse.ArgumentParser(description="Train and generate data simultaneously.")
-parser.add_argument('--steps', type=int, default=128)
-parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--resolution', type=int, default=64)
-parser.add_argument('--modelName', default="vorticity3.h5")
-parser.add_argument('--gui', dest='showGui', action='store_true')
-parser.set_defaults(showGui=False)
 
-args = parser.parse_args()
-
-steps = args.steps
 simName = "NeuralTurbolance"
-npSeed = 1282749#args.seed #9782341 #1282749 #5281034 # 3570583
-resolution = args.resolution
+npSeed = 3570583#args.seed #9782341 #1282749 #5281034 # 3570583
+resolution = 64
+
+showGui = False
+writeData = False # in this mode no network is trained
+dataSetSize = 1024
+dataName = "allInActive"
+warmupSteps = 1024
 
 # Scene settings
 # ---------------------------------------------------------------------#
 setDebugLevel(0)
-# in this mode no network is trained
-writeData = True
-dataSetSize = 1024
-dataName = "all"
 
 # NN params
 # ----------------------------------------------------------------------#
-modelName = "AddInputs"
+modelName = "AddInputsAll3"
 windowSize = 1
 batchSize = 1
 
-batchDistance = 1024
+batchDistance = 512
 
 inOutScale = 8
 
@@ -76,8 +68,9 @@ offset = 20
 interval = 1
 useMovingObstacle = False
 useScalingObstacle = False
-varyScalingSteps = 1277
+varyScalingSteps = 277#947
 useVaryingInflow = False
+varyInflowSteps = 357
 useVaryingNoise = True
 varyNoiseSteps = 2048
 
@@ -152,7 +145,7 @@ sourceSize = (int(math.ceil(res*0.081))*2, int(math.ceil(res*0.1)))
 sourcePos  = (int(res*0.5) - sourceSize[0] // 2, 1)
 #sourceVel = Cylinder( parent=sm, center=gs*vec3(0.5,0.2,0.5), radius=res*0.15, z=gs*vec3(0.05, 0.0, 0))
 
-if args.showGui or True:
+if showGui:
 	gui = Gui()
 	gui.show()
 
@@ -177,8 +170,7 @@ def generateData(offset, batchSize):
 		slidingWindow[INFLOW] = np.zeros((windowSize,)+(sourceSize if not useFullResInflow else outputResFull))
 		inputHistory[INFLOW]  = np.zeros((historySize,)+slidingWindow[INFLOW].shape)
 	if useInflowVelInput:
-		velRes = (sourceSize if not useFullResInflow else outputResFull)
-		slidingWindow[INFLOWVEL] = np.zeros((windowSize,)+velRes+(2,)) # 2 channels for the vector field
+		slidingWindow[INFLOWVEL] = np.zeros((windowSize,2))
 		inputHistory[INFLOWVEL]  = np.zeros((historySize,)+slidingWindow[INFLOWVEL].shape)
 	if usePreviousStep:
 		slidingWindow[PREVVORT] = np.zeros((windowSize,)+outputResFull)
@@ -189,7 +181,8 @@ def generateData(offset, batchSize):
 		inputHistory[OBSTACLE]  = np.zeros((historySize,)+slidingWindow[OBSTACLE].shape)
 	lowPass = np.array((resIn,resIn+1))
 	historyPtr = 0
-	velInflow = vec3(np.random.uniform(-0.02,0.02), 0, 0)
+	velInflowPy = (np.random.uniform(-0.004,0.004),0)
+	velInflow = vec3(velInflowPy[0], 0, 0)
 	obsCurRadius = obsRad
 
 	t = 0
@@ -208,20 +201,24 @@ def generateData(offset, batchSize):
 			preDensity = gridext.toNumpyArray(density,simResRed)
 		densityInflow( flags=flags, density=density, noise=noise, shape=source, scale=1, sigma=0.5 )
 		if useVaryingInflow:
-			if t % 863 == 0:
-				velInflow = vec3(np.random.uniform(-0.01,0.01), 0, 0)
+			if t % varyInflowSteps == 0:
+				velInflowPy = (np.random.uniform(-0.002,0.002),0)
+				velInflow = vec3(velInflowPy[0], 0, 0)
+				velInflowPy = (velInflowPy[0] / 0.002, 0.0)
+		#		print("{} inflow".format(t))
 			source.applyToGrid( grid=vel , value=(velInflow*float(res)) )
 
 		setWallBcs(flags=flags, vel=vel)
 		addBuoyancy(density=density, vel=vel, gravity=buoy , flags=flags)
 
 		if useScalingObstacle and t % varyScalingSteps == 0:
-			obsCurRadius = obsRad*np.random.uniform(0.90,1.10)
+			obsCurRadius = obsRad*np.random.uniform(0.80,1.20)
 			obstacle = sm.create(Sphere, center=obsPos, radius=obsCurRadius)
 			phiObs = obstacle.computeLevelset()
 			setObstacleFlags(flags=flags, phiObs=phiObs)
 			flags.fillGrid()
-			obs.applyToGrid(grid=density, value=0.)
+			obstacle.applyToGrid(grid=density, value=0.)
+		#	print("{} obstacle".format(t))
 
 		solvePressure(flags=flags, vel=vel, pressure=pressure ,  cgMaxIterFac=10.0, cgAccuracy=0.0001)
 
@@ -274,13 +271,9 @@ def generateData(offset, batchSize):
 			inflow = dif[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1]] if not useFullResInflow else np.reshape(dif[:,::-1], outputResFull)
 			moveWindow(slidingWindow[INFLOW], inflow)
 		if useInflowVelInput:
-			velocity = np.zeros(simResRed+(3,))
-			copyGridToArrayMAC(vel, velocity)
-			print(velocity[:,:,1])
-			inflow = velocity[sourcePos[0]:sourcePos[0]+sourceSize[0], sourcePos[1]:sourcePos[1]+sourceSize[1],0:2] if not useFullResInflow else np.reshape(velocity[:,::-1], outputResFull) # todo fix last dim
-			moveWindow(slidingWindow[INFLOWVEL], inflow)
+			moveWindow(slidingWindow[INFLOWVEL], velInflowPy)
 		if useObstacleInput:
-			moveWindow(slidingWindow[OBSTACLE], obsCurRadius)
+			moveWindow(slidingWindow[OBSTACLE], obsCurRadius / obsRad - 1.0)
 		
 		# record history
 		if t > offset and (t % windowSize == 0 or useLagWindows):
@@ -327,15 +320,15 @@ def generateData(offset, batchSize):
 #			print(end - start)
 #			start = time.time()
 
-gen = generateData(10, 1)
-for i in range(10):
-	next(gen)
-exit()
+#gen = generateData(1024,1)
+#for i in range(dataSetSize):
+#	next(gen)
+
 if writeData:
 	dataPath = "data/{}_{}_{}_{}_{}_{}".format(dataName, inOutScale, inputFormat.name[0], outputFormat.name[0], useReducedOutput, npSeed)
 	if not os.path.exists(dataPath):
 		os.makedirs(dataPath)
-		gen = generateData(1024, 1)
+		gen = generateData(warmupSteps, 1)
 		for i in range(dataSetSize):
 			next(gen)
 	else:
@@ -346,14 +339,18 @@ if writeData:
 # ----------------------------------------------------------------------#
 print("Setting up model.")
 
-def buildModel(batchSize, windowSize):
-	outputSize = outputRes[0]*outputRes[1]*outputRes[2]
-	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
+outputSize = outputRes[0]*outputRes[1]*outputRes[2]
 
+def buildModel(batchSize, windowSize):
 	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
 					  batch_size=batchSize, name=VORTICITY.name)
-	flatInput = layers.Reshape((windowSize, 128))(vorticityInput)
-	flatInput = layers.TimeDistributed(layers.Dense(128))(flatInput)
+	inflowInput    = keras.Input(shape=(windowSize,)+sourceSize,
+					  batch_size=batchSize, name=INFLOW.name)
+	flatInputVort = layers.Reshape((windowSize, 128))(vorticityInput)
+	flatInputVort = layers.TimeDistributed(layers.Dense(128))(flatInputVort)
+	flatInputInflow = layers.Reshape((windowSize, 12*7))(inflowInput)
+	flatInputInflow = layers.TimeDistributed(layers.Dense(12*7))(flatInputInflow)
+	flatInput = layers.Concatenate(axis=2)([flatInputVort, flatInputInflow])
 	first = layers.LSTM(80, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
@@ -365,7 +362,7 @@ def buildModel(batchSize, windowSize):
 	x = layers.Dense(1024, activation='tanh')(x)
 	x = layers.Dense(outputSize)(x)
 	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
-	model = keras.Model(inputs=[vorticityInput], outputs=output)
+	model = keras.Model(inputs=[vorticityInput, inflowInput], outputs=output)
 	if outputFormat == Format.SPATIAL:
 		model.compile(loss=keras.losses.mse,
 			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
@@ -376,25 +373,33 @@ def buildModel(batchSize, windowSize):
 	return model
 
 def buildModel2(batchSize, windowSize):
-	outputSize = outputRes[0]*outputRes[1]*outputRes[2]
-	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
-
 	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
 					  batch_size=batchSize, name=VORTICITY.name)
-	flatInput = layers.Reshape((windowSize, 128))(vorticityInput)
-	flatInput = layers.TimeDistributed(layers.Dense(128))(flatInput)
-	first = layers.LSTM(40, activation='tanh', 
+	inflowInput    = keras.Input(shape=(windowSize,)+sourceSize,
+					  batch_size=batchSize, name=INFLOW.name)
+	obstacleInput = keras.Input(shape=(windowSize,1),
+					  batch_size=batchSize, name=OBSTACLE.name)
+	inflowVelInput = keras.Input(shape=(windowSize,2),
+					  batch_size=batchSize, name=INFLOWVEL.name)
+	flatInputVort = layers.Reshape((windowSize, 128))(vorticityInput)
+	flatInputVort = layers.TimeDistributed(layers.Dense(128))(flatInputVort)
+	flatInputInflow = layers.Reshape((windowSize, 12*7))(inflowInput)
+	flatInputInflow = layers.TimeDistributed(layers.Dense(12*7))(flatInputInflow)
+	flatInputObstacle = layers.LSTM(4, stateful=True, return_sequences=True)(obstacleInput)
+	flatInputInflowVel = layers.LSTM(4, stateful=True, return_sequences=True)(inflowVelInput)
+	flatInput = layers.Concatenate(axis=2)([flatInputVort, flatInputInflow, flatInputObstacle, flatInputInflowVel])
+	first = layers.LSTM(80, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
-	x2 = layers.LSTM(40, stateful=True, return_sequences=True)(first)
+	x2 = layers.LSTM(80, stateful=True, return_sequences=True)(first)
 	x1 = layers.Add()([first,x2])
-	x1 = layers.LSTM(40, stateful=True, return_sequences=False)(x1)
-	x = layers.Reshape((1,1,40))(x1)
+	x1 = layers.LSTM(80, stateful=True, return_sequences=False)(x1)
+	x = layers.Reshape((1,1,80))(x1)
 	x = layers.Dense(256, activation='tanh')(x)
 	x = layers.Dense(1024, activation='tanh')(x)
 	x = layers.Dense(outputSize)(x)
 	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
-	model = keras.Model(inputs=[vorticityInput], outputs=output)
+	model = keras.Model(inputs=[vorticityInput, inflowInput, obstacleInput, inflowVelInput], outputs=output)
 	if outputFormat == Format.SPATIAL:
 		model.compile(loss=keras.losses.mse,
 			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
@@ -403,29 +408,79 @@ def buildModel2(batchSize, windowSize):
 			optimizer=keras.optimizers.RMSprop())
 
 	return model
-
 def buildModel3(batchSize, windowSize):
-	outputSize = outputRes[0]*outputRes[1]*outputRes[2]
-	inSize = lowFreqRes[0] * lowFreqRes[1] * lowFreqRes[2]
-
 	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
 					  batch_size=batchSize, name=VORTICITY.name)
-	flatInput = layers.Reshape((windowSize, 128))(vorticityInput)
-	flatInput = layers.TimeDistributed(layers.Dense(128))(flatInput)
-	first = layers.LSTM(40, activation='tanh', 
+	inflowInput    = keras.Input(shape=(windowSize,)+sourceSize,
+					  batch_size=batchSize, name=INFLOW.name)
+	obstacleInput = keras.Input(shape=(windowSize,1),
+					  batch_size=batchSize, name=OBSTACLE.name)
+	inflowVelInput = keras.Input(shape=(windowSize,2),
+					  batch_size=batchSize, name=INFLOWVEL.name)
+	flatInputVort = layers.Reshape((windowSize, 128))(vorticityInput)
+	flatInputVort = layers.TimeDistributed(layers.Dense(128))(flatInputVort)
+	flatInputInflow = layers.Reshape((windowSize, 12*7))(inflowInput)
+	flatInputInflow = layers.TimeDistributed(layers.Dense(12*7))(flatInputInflow)
+	flatInputObstacle = layers.Reshape((windowSize, 1))(obstacleInput)
+	flatInputObstacle = layers.LSTM(4, stateful=True, return_sequences=True)(flatInputObstacle)
+	flatInputInflowVel = layers.Reshape((windowSize, 2))(inflowVelInput)
+	flatInputInflowVel = layers.LSTM(4, stateful=True, return_sequences=True)(flatInputInflowVel)
+	flatInput = layers.Concatenate(axis=2)([flatInputVort, flatInputInflow, flatInputObstacle, flatInputInflowVel])
+	first = layers.LSTM(100, activation='tanh', 
 				stateful=True,
 				return_sequences=True)(flatInput)
-	x2 = layers.LSTM(40, stateful=True, return_sequences=True)(first)
+	x2 = layers.LSTM(100, stateful=True, return_sequences=True)(first)
 	x1 = layers.Add()([first,x2])
-	x1 = layers.LSTM(40, stateful=True, return_sequences=False)(x1)
-#	x = layers.Reshape((40,))(x1)
-	flatInput = layers.Lambda(lambda x : x[:,-1])(flatInput)
-	x = layers.Concatenate(axis=1)([flatInput, x1])
+	x2 = layers.LSTM(100, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([x1,x2])
+	x2 = layers.LSTM(100, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([x1,x2])
+	x1 = layers.LSTM(128, stateful=True, return_sequences=False)(x1)
+	x = layers.Reshape((1,1,128))(x1)
 	x = layers.Dense(256, activation='tanh')(x)
 	x = layers.Dense(1024, activation='tanh')(x)
 	x = layers.Dense(outputSize)(x)
 	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
-	model = keras.Model(inputs=[vorticityInput], outputs=output)
+	model = keras.Model(inputs=[vorticityInput, inflowInput, obstacleInput, inflowVelInput], outputs=output)
+	if outputFormat == Format.SPATIAL:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
+	else:
+		model.compile(loss=keras.losses.mse,
+			optimizer=keras.optimizers.RMSprop())
+
+	return model
+
+def buildModel4(batchSize, windowSize):
+	vorticityInput = keras.Input(shape=(windowSize,)+lowFreqRes,
+					  batch_size=batchSize, name=VORTICITY.name)
+	inflowInput    = keras.Input(shape=(windowSize,)+sourceSize,
+					  batch_size=batchSize, name=INFLOW.name)
+	obstacleInput = keras.Input(shape=(windowSize,1),
+					  batch_size=batchSize, name=OBSTACLE.name)
+	flatInputVort = layers.Reshape((windowSize, 128))(vorticityInput)
+	flatInputVort = layers.TimeDistributed(layers.Dense(128))(flatInputVort)
+	flatInputInflow = layers.Reshape((windowSize, 12*7))(inflowInput)
+	flatInputInflow = layers.TimeDistributed(layers.Dense(12*7))(flatInputInflow)
+	flatInputObstacle = layers.Reshape((windowSize, 1))(obstacleInput)
+	flatInputObstacle = layers.LSTM(8, stateful=True, return_sequences=True)(flatInputObstacle)
+	flatInput = layers.Concatenate(axis=2)([flatInputVort, flatInputInflow, flatInputObstacle])
+	first = layers.LSTM(100, activation='tanh', 
+				stateful=True,
+				return_sequences=True)(flatInput)
+	x2 = layers.LSTM(100, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([first,x2])
+	x2 = layers.LSTM(100, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([x1,x2])
+	x2 = layers.LSTM(100, stateful=True, return_sequences=True)(first)
+	x1 = layers.Add()([x1,x2])
+	x1 = layers.LSTM(128, stateful=True, return_sequences=False)(x1)
+	x = layers.Reshape((1,1,128))(x1)
+	x = layers.Dense(256, activation='tanh')(x)
+	x = layers.Dense(1024, activation='tanh')(x)
+	x = layers.Dense(outputSize)(x)
+	output = layers.Reshape(outputRes, name=VORTICITY.asOut())(x)
+	model = keras.Model(inputs=[vorticityInput, inflowInput, obstacleInput], outputs=output)
 	if outputFormat == Format.SPATIAL:
 		model.compile(loss=keras.losses.mse,
 			optimizer=keras.optimizers.RMSprop(learning_rate=0.001))
@@ -436,10 +491,14 @@ def buildModel3(batchSize, windowSize):
 	return model
 
 
-models = [buildModel(batchSize,windowSize)]#, buildModel2(batchSize,windowSize), buildModel3(batchSize,windowSize)]
-validModels = [buildModel(1,1)]#, buildModel2(1,1),buildModel3(1,1)]
-models[0].summary()
-#model = tf.keras.models.load_model("learning.h5", tfextensions.functionMap)
+models = [buildModel(batchSize,windowSize),
+		  buildModel2(batchSize,windowSize)]
+	#	  buildModel3(batchSize,windowSize)]
+	#	  buildModel4(batchSize,windowSize)]
+validModels = [buildModel(1,1),
+			   buildModel2(1,1)]
+	#		   buildModel3(1,1)]
+	#		   buildModel4(1,1)]
 
 # model training
 # ----------------------------------------------------------------------#
@@ -448,19 +507,17 @@ fullName = "{}_W{}_B{}".format(modelName, windowSize, batchSize)
 # validation data set
 if outputFormat == Format.FREQUENCY:
 	if inputFormat == Format.FREQUENCY:
-		dataName = "fullout_8_F_F_True_5281034"
+		dataName = "all2_8_F_F_True_5281034"
 	else:
-		dataName = "fullout_8_S_F_True_5281034"
+		dataName = "allActive_8_S_F_True_1282749"
 else:
 	if inputFormat == Format.FREQUENCY:
-		dataName = "fullout_8_F_S_True_5281034"
+		dataName = "all2_8_F_S_True_5281034"
 	else:
-		dataName = "fullout_8_S_S_True_5281034"
+		dataName = "all2_8_S_S_True_5281034"
 path = "data/" + dataName + "/"
 
 inputs, outputs, _ = loadDataSet(path, 1, useLagWindows);
-#if batchSize > 1:
-#	inputFrames, outputs = ioext.createBatches(inputFrames, outputs, batchSize)
 
 def generateValid(inputBatches, outputBatches):
 	ind = 0
@@ -514,12 +571,12 @@ cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath="currentmodel/cp.ckpt"
                                                  save_weights_only=True,
                                                  verbose=1)
 
-generator = generateData(1024, batchSize)
+generator = generateData(warmupSteps, batchSize)
 for i in range(len(models)):
 	validation_callback = ValidationCallback(inputs, outputs, validModels[i], 1)
 	history = models[i].fit(x = generator,
-							  steps_per_epoch=512, 
-							  epochs=50,
+							  steps_per_epoch=12, 
+							  epochs=5,
 							  callbacks=[validation_callback], # validation_callback
 							  use_multiprocessing=False)
 
